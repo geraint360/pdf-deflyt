@@ -3,10 +3,10 @@ set -euo pipefail
 
 # pdf-squeeze installer (macOS + Linux)
 # - Installs Homebrew on macOS (if missing)
-# - Installs deps (gs, pdfcpu, qpdf, exiftool, poppler, coreutils, mutool, parallel*)
-# - Installs pdf-squeeze to ~/bin (override with --prefix)
+# - Installs deps (gs, pdfcpu, qpdf, exiftool, poppler, coreutils, mutool, imagemagick, parallel*)
+# - Installs pdf-squeeze and pdf-squeeze-image-recompress helper to ~/bin (override with --prefix)
 # - Installs DEVONthink scripts on macOS (DT4/DT3) only when --with-devonthink is passed
-# - Supports: --no-parallel, --verify-only, --uninstall
+# - Supports: --no-parallel, --no-imagemagick, --verify-only, --uninstall
 #
 # Usage:
 # curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh | bash
@@ -17,6 +17,7 @@ PDFCPU_VERSION="0.11.0"   # linux fallback download if no package is available
 PREFIX_DEFAULT="$HOME/bin"
 INSTALL_PREFIX="$PREFIX_DEFAULT"
 INSTALL_PARALLEL=1
+INSTALL_IMAGEMAGICK=1
 VERIFY_ONLY=0
 UNINSTALL=0
 INSTALL_DT=0              # macOS only (off by default)
@@ -35,6 +36,7 @@ Options:
   --dt {auto|3|4}     Target DEVONthink version on macOS (default: auto)
   --prefix PATH       Where to install pdf-squeeze (default: $PREFIX_DEFAULT)
   --no-parallel       Do not install GNU parallel
+  --no-imagemagick    Do not install ImageMagick (ICC profile support will be unavailable)
   --verify-only       Check installation status without making changes
   --uninstall         Remove installed files (does not remove system packages)
   -h, --help          Show this help
@@ -45,8 +47,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) shift; INSTALL_PREFIX="${1:-}"; [[ -n "${INSTALL_PREFIX}" ]] || die "--prefix needs a path";;
     --with-devonthink) INSTALL_DT=1;;
-		--dt) shift; DT_MODE="${1:-auto}"; case "$DT_MODE" in auto|3|4) ;; *) die "--dt must be auto|3|4";; esac ;;
+    --dt) shift; DT_MODE="${1:-auto}"; case "$DT_MODE" in auto|3|4) ;; *) die "--dt must be auto|3|4";; esac ;;
     --no-parallel) INSTALL_PARALLEL=0;;
+    --no-imagemagick) INSTALL_IMAGEMAGICK=0;;
     --verify-only) VERIFY_ONLY=1;;
     --uninstall) UNINSTALL=1;;
     -h|--help) usage; exit 0;;
@@ -54,9 +57,6 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
-
-# Legacy shim (harmless if unused):
-detect_dt_apps() { :; }
 
 on_macos()  { [[ "$(uname -s)" == "Darwin" ]]; }
 on_linux()  { [[ "$(uname -s)" == "Linux"  ]]; }
@@ -122,6 +122,7 @@ install_deps_macos() {
   for p in "${req[@]}"; do brew_install_if_missing "$p"; done
   ensure_mutool_macos
   if [[ $INSTALL_PARALLEL -eq 1 ]]; then brew_install_if_missing parallel; fi
+  if [[ $INSTALL_IMAGEMAGICK -eq 1 ]]; then brew_install_if_missing imagemagick; fi
 }
 
 # ---------- Linux (apt/dnf/pacman/zypper) ----------
@@ -173,19 +174,18 @@ install_pdfcpu_linux_if_missing() {
     log "[deps] pdfcpu installed via package manager"
     return
   fi
-  # Fallback: download prebuilt release (try a few common asset names)
+  # Fallback: download prebuilt release
   local arch; arch="$(arch_id)"
-  local tmp dir url
+  local tmp dir
   tmp="$(mktemp -d)"
   dir="$tmp/pdfcpu"
   mkdir -p "$dir"
 
-  # Try candidates
   local -a urls=(
-		"https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_linux_${arch}.tar.xz"
-		"https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_${arch}.tar.xz"
-		"https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_$( [[ $arch == amd64 ]] && echo x86_64 || echo ${arch} ).tar.xz"
-	)
+    "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_linux_${arch}.tar.xz"
+    "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_${arch}.tar.xz"
+    "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_$( [[ $arch == amd64 ]] && echo x86_64 || echo ${arch} ).tar.xz"
+  )
   local ok=0
   for url in "${urls[@]}"; do
     log "[deps] Trying $url"
@@ -194,19 +194,18 @@ install_pdfcpu_linux_if_missing() {
   [[ $ok -eq 1 ]] || die "Failed to download pdfcpu tarball"
 
   tar -xJf "$tmp/pdfcpu.tar.xz" -C "$dir"
-  # Find the binary anywhere in the extracted tree
-	local bin
-	bin="$(find "$dir" -type f -name pdfcpu -perm -111 | head -n1 || true)"
-	[[ -n "$bin" ]] || die "pdfcpu binary not found in downloaded archive"
-	
-	if [[ -w /usr/local/bin ]]; then
-		sudo install -m 0755 "$bin" /usr/local/bin/pdfcpu
-		log "[deps] pdfcpu -> /usr/local/bin/pdfcpu"
-	else
-		mkdir -p "$HOME/bin"
-		install -m 0755 "$bin" "$HOME/bin/pdfcpu"
-		log "[deps] pdfcpu -> $HOME/bin/pdfcpu (add \$HOME/bin to PATH if needed)"
-	fi
+  local bin
+  bin="$(find "$dir" -type f -name pdfcpu -perm -111 | head -n1 || true)"
+  [[ -n "$bin" ]] || die "pdfcpu binary not found in downloaded archive"
+  
+  if [[ -w /usr/local/bin ]]; then
+    sudo install -m 0755 "$bin" /usr/local/bin/pdfcpu
+    log "[deps] pdfcpu -> /usr/local/bin/pdfcpu"
+  else
+    mkdir -p "$HOME/bin"
+    install -m 0755 "$bin" "$HOME/bin/pdfcpu"
+    log "[deps] pdfcpu -> $HOME/bin/pdfcpu (add \$HOME/bin to PATH if needed)"
+  fi
   rm -rf "$tmp"
 }
 install_deps_linux() {
@@ -230,32 +229,30 @@ install_deps_linux() {
       ;;
   esac
   if [[ $INSTALL_PARALLEL -eq 1 ]]; then pkgs+=(parallel); fi
+  if [[ $INSTALL_IMAGEMAGICK -eq 1 ]]; then pkgs+=(imagemagick); fi
 
   log "[install] Installing Linux dependencies via $pkg_mgr..."
   linux_install_pkgs "${pkgs[@]}"
 
-  # Ensure mutool exists (mandatory). If the chosen package set didn't provide it, try 'mupdf'.
+  # Ensure mutool exists (mandatory)
   if ! command -v mutool >/dev/null 2>&1; then
     log "[deps] mutool not found, trying 'mupdf' as a provider..."
     linux_install_pkgs mupdf || true
     command -v mutool >/dev/null 2>&1 || die "mutool not found (install 'mupdf-tools' or 'mupdf')."
   fi
 
-  # Ensure pdfcpu exists (package or prebuilt release)
+  # Ensure pdfcpu exists
   install_pdfcpu_linux_if_missing
 }
 
 # ---------- DEVONthink installation ----------
 
-# Detect DEVONthink by app presence, optionally confirm via bundle ID,
-# and fall back to existing App Scripts dirs. Emits only relevant bases.
 dt_target_dirs() {
   local want="${DT_MODE:-auto}"
 
   local base4="$HOME/Library/Application Scripts/com.devon-technologies.think"
   local base3="$HOME/Library/Application Scripts/com.devon-technologies.think3"
 
-  # DT4 can be "DEVONthink.app" or "DEVONthink 4.app"
   local cands4=(
     "/Applications/DEVONthink.app"
     "/Applications/DEVONthink 4.app"
@@ -268,11 +265,9 @@ dt_target_dirs() {
   )
 
   local has4=0 has3=0
-  # App presence is primary
   for p in "${cands4[@]}"; do [[ -d "$p" ]] && { has4=1; break; }; done
   for p in "${cands3[@]}"; do [[ -d "$p" ]] && { has3=1; break; }; done
 
-  # If apps weren’t found, but script dirs already exist, still target them
   [[ -d "$base4" ]] && has4=1
   [[ -d "$base3" ]] && has3=1
 
@@ -286,7 +281,6 @@ dt_target_dirs() {
   esac
 }
 
-# If DT_MODE explicitly selects 3 or 4, remove scripts from the other version
 cleanup_other_dt_version_if_explicit() {
   case "${DT_MODE:-auto}" in
     4)
@@ -301,6 +295,7 @@ cleanup_other_dt_version_if_explicit() {
       ;;
   esac
 }
+
 install_dt_scripts_macos() {
   local base_url="$REPO_RAW/devonthink-scripts/src"
   local src_menu_url="$base_url/Compress%20PDF%20Now.applescript"
@@ -344,12 +339,12 @@ install_dt_scripts_macos() {
 ensure_dirs() {
   mkdir -p "$INSTALL_PREFIX"
   if [[ "$INSTALL_PREFIX" == "$HOME/bin" ]]; then
-		local export_line='export PATH="$HOME/bin:$PATH"'
-		grep -q 'HOME/bin' "$HOME/.zprofile" 2>/dev/null || { echo "$export_line" >> "$HOME/.zprofile"; log "[path] Added ~/bin to ~/.zprofile"; }
-		if [[ "${SHELL##*/}" == "bash" || -f "$HOME/.bash_profile" ]]; then
-			grep -q 'HOME/bin' "$HOME/.bash_profile" 2>/dev/null || { echo "$export_line" >> "$HOME/.bash_profile"; log "[path] Added ~/bin to ~/.bash_profile"; }
-		fi
-	fi
+    local export_line='export PATH="$HOME/bin:$PATH"'
+    grep -q 'HOME/bin' "$HOME/.zprofile" 2>/dev/null || { echo "$export_line" >> "$HOME/.zprofile"; log "[path] Added ~/bin to ~/.zprofile"; }
+    if [[ "${SHELL##*/}" == "bash" || -f "$HOME/.bash_profile" ]]; then
+      grep -q 'HOME/bin' "$HOME/.bash_profile" 2>/dev/null || { echo "$export_line" >> "$HOME/.bash_profile"; log "[path] Added ~/bin to ~/.bash_profile"; }
+    fi
+  fi
 }
 
 download_to() {
@@ -359,10 +354,18 @@ download_to() {
 
 install_files() {
   ensure_dirs
+  
+  # Install main pdf-squeeze script
   local bin_dst="$INSTALL_PREFIX/pdf-squeeze"
   log "[get] Installing pdf-squeeze -> $bin_dst"
   download_to "$REPO_RAW/pdf-squeeze" "$bin_dst"
   chmod +x "$bin_dst"
+  
+  # Install helper script for ICC profile images
+  local helper_dst="$INSTALL_PREFIX/pdf-squeeze-image-recompress"
+  log "[get] Installing pdf-squeeze-image-recompress -> $helper_dst"
+  download_to "$REPO_RAW/pdf-squeeze-image-recompress" "$helper_dst"
+  chmod +x "$helper_dst"
 
   if on_macos && [[ $INSTALL_DT -eq 1 ]]; then
     cleanup_other_dt_version_if_explicit
@@ -373,7 +376,12 @@ install_files() {
 uninstall_everything() {
   local removed=0
   local bin_dst="$INSTALL_PREFIX/pdf-squeeze"
+  local helper_dst="$INSTALL_PREFIX/pdf-squeeze-image-recompress"
+  local venv_dir="$INSTALL_PREFIX/.pdf-squeeze-venv"
+  
   if [[ -f "$bin_dst" ]]; then rm -f "$bin_dst"; log "[rm] $bin_dst"; removed=1; fi
+  if [[ -f "$helper_dst" ]]; then rm -f "$helper_dst"; log "[rm] $helper_dst"; removed=1; fi
+  if [[ -d "$venv_dir" ]]; then rm -rf "$venv_dir"; log "[rm] $venv_dir"; removed=1; fi
 
   if on_macos; then
     local removed_dt=0
@@ -397,75 +405,99 @@ uninstall_everything() {
 verify_report() {
   echo "=== pdf-squeeze installation report ==="
   echo "OS: $(uname -s) ($(uname -m))"
-  echo "pdf-squeeze: $(command -v pdf-squeeze || echo 'not on PATH')"
-  echo "ghostscript: $(command -v gs || echo 'missing')"
-  echo "pdfcpu: $(command -v pdfcpu || echo 'missing')"
-  echo "qpdf: $(command -v qpdf || echo 'missing')"
-  echo "mutool: $(command -v mutool || echo 'missing')"
-  echo "exiftool: $(command -v exiftool || echo 'missing')"
-  echo "pdftotext: $(command -v pdftotext || echo 'missing')"
-  if on_macos; then
-		echo "gstat: $(command -v gstat || echo 'missing (from coreutils)')"
-	else
-		# On Linux, plain `stat` is GNU coreutils on most distros
-		if stat --version >/dev/null 2>&1; then
-			echo "stat: $(command -v stat)"
-		else
-			echo "stat: missing"
-		fi
-	fi
-  echo "parallel: $(command -v parallel || echo 'missing (optional)')"
   echo
-	if on_macos; then
-		# Only report DT status if user requested DT install OR scripts already exist.
-		if [[ $INSTALL_DT -eq 1 ]]; then
-			echo "DEVONthink scripts (mode=$DT_MODE):"
-			local any=0
-			while IFS= read -r base; do
-				[[ -n "$base" ]] || continue
-				any=1
-				local menu="$base/Menu/Compress PDF Now.scpt"
-				local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
-				[[ -f "$menu" ]] && echo "  OK      $menu" || echo "  MISSING $menu"
-				[[ -f "$rule" ]] && echo "  OK      $rule" || echo "  MISSING $rule"
-			done < <(dt_target_dirs)
-			[[ $any -eq 0 ]] && echo "  (no matching DEVONthink installation detected; nothing expected)"
-		else
-			# Check silently whether any DT scripts are present; if so, list them,
-			# otherwise just say it was skipped.
-			local any_exist=0
-			while IFS= read -r base; do
-				[[ -n "$base" ]] || continue
-				for f in \
-					"$base/Menu/Compress PDF Now.scpt" \
-					"$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
-				do
-					[[ -f "$f" ]] && any_exist=1
-				done
-			done < <(dt_target_dirs)
-	
-			if [[ $any_exist -eq 1 ]]; then
-				echo "DEVONthink scripts detected (mode=$DT_MODE):"
-				while IFS= read -r base; do
-					[[ -n "$base" ]] || continue
-					local menu="$base/Menu/Compress PDF Now.scpt"
-					local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
-					[[ -f "$menu" ]] && echo "  OK      $menu" || true
-					[[ -f "$rule" ]] && echo "  OK      $rule" || true
-				done < <(dt_target_dirs)
-			else
-				echo "DEVONthink: (skipped; pass --with-devonthink to install)"
-			fi
-		fi
-	else
-		echo "DEVONthink: (not applicable on Linux)"
-	fi
+  echo "Core scripts:"
+  echo "  pdf-squeeze: $(command -v pdf-squeeze || echo 'not on PATH')"
+  echo "  helper: $(command -v pdf-squeeze-image-recompress || echo 'not on PATH')"
+  echo
+  echo "Required dependencies:"
+  echo "  ghostscript: $(command -v gs || echo 'MISSING')"
+  echo "  pdfcpu: $(command -v pdfcpu || echo 'MISSING')"
+  echo "  qpdf: $(command -v qpdf || echo 'MISSING')"
+  echo "  mutool: $(command -v mutool || echo 'MISSING')"
+  echo "  exiftool: $(command -v exiftool || echo 'MISSING')"
+  echo "  pdftotext: $(command -v pdftotext || echo 'MISSING')"
+  echo "  pdfimages: $(command -v pdfimages || echo 'MISSING')"
+  if on_macos; then
+    echo "  gstat: $(command -v gstat || echo 'MISSING (from coreutils)')"
+  else
+    if stat --version >/dev/null 2>&1; then
+      echo "  stat: $(command -v stat)"
+    else
+      echo "  stat: MISSING"
+    fi
+  fi
+  echo
+  echo "Optional dependencies:"
+  echo "  parallel: $(command -v parallel || echo 'missing (batch processing will be serial)')"
+  
+  # Check for ImageMagick (both IM6 and IM7)
+  if command -v magick >/dev/null 2>&1; then
+    echo "  imagemagick: $(command -v magick) (ICC profile support available)"
+  elif command -v convert >/dev/null 2>&1; then
+    echo "  imagemagick: $(command -v convert) (ICC profile support available)"
+  else
+    echo "  imagemagick: missing (ICC profile images will use structural compression only)"
+  fi
+  
+  echo
+  if on_macos; then
+    if [[ $INSTALL_DT -eq 1 ]]; then
+      echo "DEVONthink scripts (mode=$DT_MODE):"
+      local any=0
+      while IFS= read -r base; do
+        [[ -n "$base" ]] || continue
+        any=1
+        local menu="$base/Menu/Compress PDF Now.scpt"
+        local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+        [[ -f "$menu" ]] && echo "  OK      $menu" || echo "  MISSING $menu"
+        [[ -f "$rule" ]] && echo "  OK      $rule" || echo "  MISSING $rule"
+      done < <(dt_target_dirs)
+      [[ $any -eq 0 ]] && echo "  (no matching DEVONthink installation detected)"
+    else
+      local any_exist=0
+      while IFS= read -r base; do
+        [[ -n "$base" ]] || continue
+        for f in \
+          "$base/Menu/Compress PDF Now.scpt" \
+          "$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+        do
+          [[ -f "$f" ]] && any_exist=1
+        done
+      done < <(dt_target_dirs)
+
+      if [[ $any_exist -eq 1 ]]; then
+        echo "DEVONthink scripts detected (mode=$DT_MODE):"
+        while IFS= read -r base; do
+          [[ -n "$base" ]] || continue
+          local menu="$base/Menu/Compress PDF Now.scpt"
+          local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+          [[ -f "$menu" ]] && echo "  OK      $menu" || true
+          [[ -f "$rule" ]] && echo "  OK      $rule" || true
+        done < <(dt_target_dirs)
+      else
+        echo "DEVONthink: (skipped; pass --with-devonthink to install)"
+      fi
+    fi
+  else
+    echo "DEVONthink: (not applicable on Linux)"
+  fi
+  
   echo
   echo "PREFIX: $INSTALL_PREFIX"
   if [[ ":$PATH:" == *":$INSTALL_PREFIX:"* ]]; then
-    echo "PATH includes $INSTALL_PREFIX"
+    echo "PATH: OK (includes $INSTALL_PREFIX)"
   else
-    echo "PATH does NOT include $INSTALL_PREFIX (add to ~/.zprofile or your shell rc)"
+    echo "PATH: Add $INSTALL_PREFIX to your PATH in ~/.zprofile or shell rc"
+  fi
+  
+  echo
+  echo "Python environment for helper:"
+  local venv_dir="$INSTALL_PREFIX/.pdf-squeeze-venv"
+  if [[ -d "$venv_dir" ]]; then
+    echo "  Virtual env: $venv_dir (PyMuPDF installed)"
+  else
+    echo "  Virtual env: Will be created on first use of ICC profile compression"
   fi
 }
 
@@ -496,6 +528,8 @@ main() {
   log "[install] Verifying..."
   verify_report
   log "[install] Complete."
+  log
+  log "Run 'pdf-squeeze --check-deps' to verify all dependencies."
 }
 
 main "$@"
