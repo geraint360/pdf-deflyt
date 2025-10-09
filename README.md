@@ -10,6 +10,7 @@ A fast PDF size reducer for macOS and Linux. Targets **material** file-size savi
 
 - Simple CLI: `pdf-squeeze input.pdf -o output.pdf` (or compress in place with `--inplace`)
 - Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**, **archive**
+- **ICC profile support**: Automatically detects and handles complex color profiles using ImageMagick
 - Batch processing (files or folders), recursion, include/exclude filters, and parallel jobs
 - Dry‑run estimator with projected size and savings (no writes)
 - Skip rules to avoid work on tiny files or when savings would be negligible
@@ -274,6 +275,54 @@ pdf-squeeze --inplace --post-hook 'echo Processed: {} >> ~/processed.log' ~/Scan
 
 ---
 
+## ICC Profile Images
+
+PDFs with ICC color profiles (common in professional photography, design work, and some scanned documents) require special handling to preserve color accuracy.
+
+### How It Works
+
+`pdf-squeeze` automatically:
+1. Detects FlateDecode-compressed images with ICC profiles
+2. Uses the `pdf-squeeze-image-recompress` helper script
+3. Converts images via ImageMagick (preserves ICC profiles)
+4. Reinserts properly-compressed images into the PDF
+
+### Requirements
+
+- **ImageMagick 6 or 7** (installed automatically by installer)
+- **Python 3.7+** (standard on modern macOS/Linux)
+- **PyMuPDF** (auto-installed in isolated venv on first use)
+
+The helper script automatically creates a local Python virtual environment (`.pdf-squeeze-venv`) and installs PyMuPDF on first run. No manual Python setup required.
+
+### What Happens Without ImageMagick?
+
+If ImageMagick is not installed:
+- PDFs with ICC profile images will use **structural compression only** (1-5% typical savings)
+- A warning message will be displayed
+- Install ImageMagick to enable full compression: `brew install imagemagick` (macOS) or `sudo apt install imagemagick` (Linux)
+
+### Supported ImageMagick Versions
+
+- **ImageMagick 7** (macOS/Linux): Uses `magick` command
+- **ImageMagick 6** (legacy): Uses `convert` command
+- Both versions fully supported and auto-detected
+
+### Example
+```bash
+# PDF with ICC profiles - automatically handled
+pdf-squeeze photo-portfolio.pdf
+# NOTICE: Detected ICC profile images, using ImageMagick-based compression
+# → photo-portfolio_squeezed.pdf  (89.4% smaller)  [ok]
+
+# Verify helper is working
+pdf-squeeze-image-recompress --help
+
+# Debug mode shows detection
+pdf-squeeze --debug icc-document.pdf
+```
+---
+
 ## Compression Logic (what happens under the hood)
 
 `pdf-squeeze` aims for “smaller, still-good” — not just the smallest possible bytes. The pipeline is content-aware and tuned to keep text selectable, preserve vector graphics when possible, and compress raster images aggressively only when it’s safe.
@@ -451,6 +500,29 @@ Use the `--prefix` option if you need to override defaults.
   ```
   Then restart DEVONthink. (Updates to the Smart Rule don't appear to take effect without restarting DEVONthink.)
 
+- **"Python helper failed" or "ImageMagick helper unavailable"**  
+  Install ImageMagick:  
+```bash
+  brew install imagemagick  # macOS
+  sudo apt install imagemagick  # Linux
+  ```
+  Verify helper exists:
+  ```bash
+  ls -l $(dirname $(which pdf-squeeze))/pdf-squeeze-image-recompress
+  pdf-squeeze-image-recompress --help
+  ```
+  The Python virtual environment is created automatically on first use.
+
+- **Images look corrupted or have wrong colors**  
+  This can happen with ICC profile images if ImageMagick is not installed.
+  Install ImageMagick and re-run compression.  
+
+- **"NOTICE: Detected ICC profile images"**  
+  This is informational - your PDF has complex color profiles.
+  Compression will take slightly longer but colors will be preserved.
+  If you see "WARNING: ImageMagick helper unavailable", install ImageMagick.
+
+
 ---
 
 # Development
@@ -494,6 +566,7 @@ Or manually move the compiled `.scpt` files into DEVONthink 3's scripts location
 ## Repository Layout
 
 - `pdf-squeeze` — the zsh CLI
+- `pdf-squeeze-image-recompress` — Python helper for ICC profile images
 - `tests/` — fixtures, helpers, and the full test suite
 - `scripts/` — `lint.sh`, `format.sh`
 - `devonthink-scripts/` — optional AppleScripts and compiled `.scpt`
@@ -527,6 +600,7 @@ The suite verifies:
 
 - `PDF_SQUEEZE_SKIP_CLEAN=1 make test` — keep existing `tests/assets`/`tests/build`
 - `PDF_SQUEEZE_TEST_JOBS=8 make test` — control parallelism in the test harness
+- `SKIP_IMAGEMAGICK_TESTS=1 make test` — skip ICC profile tests if ImageMagick unavailable
 
 ## Linting & Formatting
 

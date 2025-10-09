@@ -46,6 +46,11 @@ done
 cat > "$BUILD_DIR/strength_order_body.sh" << 'SB'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 ok() { [ -f "$BUILD_DIR/out-standard.pdf" ] && [ -f "$BUILD_DIR/out-light.pdf" ] && [ -f "$BUILD_DIR/out-extreme.pdf" ]; }
 for i in {1..60}; do ok && break; sleep 0.5; done
 ok || { echo "outputs missing"; ls -al "$BUILD_DIR"; exit 2; }
@@ -92,16 +97,20 @@ cases+=("skip_if_smaller::bash -lc '
   rm -f \"\$BUILD_DIR/skip.pdf\"
   out=\"\$BUILD_DIR/skip.pdf\"
   msg=\$(\"\$ROOT/pdf-squeeze\" --skip-if-smaller 5MB \"\$tiny\" -o \"\$out\" 2>&1 || true)
-  if ! echo \"\$msg\" | grep -q \"SKIP (below\"; then
+  if ! echo \"\$msg\" | grep -q \"SKIP (too small\"; then
     msg=\$(\"\$ROOT/pdf-squeeze\" --skip-if-smaller 5m \"\$tiny\" -o \"\$out\" 2>&1 || true)
   fi
-  echo \"\$msg\" | grep -E \"SKIP \\(below\" >/dev/null && [ ! -f \"\$out\" ]
+  echo \"\$msg\" | grep -E \"SKIP \\(too small\" >/dev/null && [ ! -f \"\$out\" ]
 '")
 
 # 7) include/exclude filters — do both modes (default output files, then --inplace)
 cat > "$BUILD_DIR/filters_body.sh" << 'FB'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 
 logdir="$BUILD_DIR/logs"
 mkdir -p "$logdir"
@@ -180,6 +189,10 @@ cat > "$BUILD_DIR/inplace_body.sh" << 'IB'
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 set +e
 tmp="$BUILD_DIR/ip.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$tmp"
@@ -214,6 +227,11 @@ cases+=("inplace_mtime::bash \"$BUILD_DIR/inplace_body.sh\"")
 cat > "$BUILD_DIR/space_paths.sh" << 'SP'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 in="$BUILD_DIR/Input With Spaces.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$in"
 out="$BUILD_DIR/Output With Spaces.pdf"
@@ -227,6 +245,11 @@ cases+=("paths_with_spaces::bash \"$BUILD_DIR/space_paths.sh\"")
 cat > "$BUILD_DIR/quiet_body.sh" << 'QB'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 out="$BUILD_DIR/q.pdf"
 msg=$("$ROOT/pdf-squeeze" -p light "$ASSETS_DIR/mixed.pdf" -o "$out" --quiet 2>&1 || true)
 [ -f "$out" ] && ! echo "${msg:-}" | grep -q '^→ '
@@ -238,6 +261,10 @@ cases+=("quiet_suppresses_output::bash \"$BUILD_DIR/quiet_body.sh\"")
 cat > "$BUILD_DIR/jobs_parallel.sh" << 'JP'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 
 # Fixture
 rm -rf "$BUILD_DIR/many"
@@ -276,12 +303,17 @@ cases+=("default_naming_rule::bash -lc '
 cat > "$BUILD_DIR/depth_filters.sh" << 'DF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 base="$BUILD_DIR/deep"
 rm -rf "$base"
 mkdir -p "$base/A/AA" "$base/B/BB"
 cp "$ASSETS_DIR/mixed.pdf" "$base/A/AA/a.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$base/B/BB/b.pdf"
-"$ROOT/pdf-squeeze" -p light --min-gain 0 --recurse --include '/A/' --exclude '/B/' "$base" --jobs 2 >/dev/null
+"$ROOT/pdf-squeeze" -p light --min-gain 0 --recurse --include '/A/' --exclude '/B/' "$base" --jobs 1 >/dev/null 2>&1
 [ -f "$base/A/AA/a_squeezed.pdf" ] || { echo "A missing"; exit 1; }
 [ ! -f "$base/B/BB/b_squeezed.pdf" ] || { echo "B should be excluded"; exit 1; }
 DF
@@ -292,6 +324,11 @@ cases+=("depth_filters::bash \"$BUILD_DIR/depth_filters.sh\"")
 cat > "$BUILD_DIR/min_gain_tiny.sh" << 'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 in="$ASSETS_DIR/structural.pdf"
 out="$BUILD_DIR/tiny.pdf"
 msg=$("$ROOT/pdf-squeeze" -p standard --min-gain 50 "$in" -o "$out" 2>&1 || true)
@@ -310,15 +347,20 @@ cases+=("version_smoke::bash -lc '
   \"$ROOT/pdf-squeeze\" --version | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+|pdf-squeeze: \"
 '")
 
-# (H) non-PDF skip (don’t crash)
+# (H) non-PDF skip (don't crash)
 cat > "$BUILD_DIR/nonpdf_skip.sh" << 'NP'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 d="$BUILD_DIR/mixed_tree"
 rm -rf "$d"; mkdir -p "$d"
 cp "$ASSETS_DIR/mixed.pdf" "$d/ok.pdf"
 echo "hello" > "$d/note.txt"
-"$ROOT/pdf-squeeze" --recurse "$d" --jobs 2 >/dev/null || true
+"$ROOT/pdf-squeeze" --recurse "$d" --jobs 1 >/dev/null 2>&1 || true
 [ -f "$d/ok_squeezed.pdf" ] || { echo "pdf not processed"; exit 1; }
 [ ! -f "$d/note_squeezed.pdf" ] || { echo "non-pdf should not be processed"; exit 1; }
 NP
@@ -329,6 +371,10 @@ cases+=("nonpdf_skip::bash \"$BUILD_DIR/nonpdf_skip.sh\"")
 cat >"$BUILD_DIR/encrypted_body.sh" <<'ENCRYPT'
 #!/usr/bin/env bash
 set -euo pipefail
+
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 
 # Inputs
 in_plain="$ASSETS_DIR/gray.pdf"
@@ -376,6 +422,10 @@ if "$ROOT/pdf-squeeze" --help 2>&1 | grep -q -- ' --csv'; then
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+
 d="$BUILD_DIR/csv_many"
 rm -rf "$d"; mkdir -p "$d"
 
@@ -421,6 +471,9 @@ run_one() {
   run_case "$name" bash "$tmp"
 }
 
+export -f run_case
+export -f green
+export -f red
 export -f run_one
 export ROOT BUILD_DIR ASSETS_DIR
 
