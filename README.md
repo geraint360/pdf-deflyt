@@ -1,6 +1,6 @@
 # pdf-deflyt
 
-A fast PDF size reducer for macOS and Linux. Targets **material** file-size savings while keeping documents readable and searchable. Ships as a single script (`pdf-deflyt`, **zsh**) with pragmatic defaults, safety rails, and first-class batch support.
+A fast PDF size reducer for macOS and Linux. Targets **material** file-size savings while keeping documents readable and searchable. Incorporates pragmatic defaults, safety rails, and first-class batch support. 
 
 > Typical savings on mixed documents are **20–70%**, depending on content and preset. See **Presets** and **Examples** below.
 
@@ -37,7 +37,7 @@ Copy and paste this into a Terminal window:
 curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash
 ```
 
-- Installs `pdf-deflyt` to `~/bin` (default; override with `--prefix /path`).
+- Installs `pdf-deflyt` and `pdf-deflyt-image-recompress` helper to `~/bin` (default; override with `--prefix /path`).
 
 - Installs required dependencies automatically via **Homebrew** (macOS) or your package manager (Linux e.g. **apt**, **dnf**, or **brew** if present).
 
@@ -49,6 +49,11 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/
 	- **coreutils**
 	- **mupdf-tools** *(automatically preferred; falls back to `mupdf` if already installed)*
 	- **parallel** (optional, speeds up batch jobs)
+	
+  - For the optional ability to recode FlateDecode (zlib-compressed) embedded images carrying ICC profiles as lossy JPEGs
+	   - **imagemagick**
+     - **Python 3.7+** (standard on modern macOS/Linux)
+     - **PyMuPDF** (auto-installed in isolated venv on first use)
 
 - **Does not** install DEVONthink scripts unless explicitly requested. (Obviously, this is a macOS-only feature.)
 
@@ -502,25 +507,22 @@ Use the `--prefix` option if you need to override defaults.
 
 - **"Python helper failed" or "ImageMagick helper unavailable"**  
   Install ImageMagick:  
-```bash
+  ```
   brew install imagemagick  # macOS
   sudo apt install imagemagick  # Linux
   ```
   Verify helper exists:
-  ```bash
+  ```
   ls -l $(dirname $(which pdf-deflyt))/pdf-deflyt-image-recompress
   pdf-deflyt-image-recompress --help
   ```
   The Python virtual environment is created automatically on first use.
 
 - **Images look corrupted or have wrong colors**  
-  This can happen with ICC profile images if ImageMagick is not installed.
-  Install ImageMagick and re-run compression.  
+  This can happen with ICC profile images if ImageMagick is not installed. Install ImageMagick and re-run compression.  
 
 - **"NOTICE: Detected ICC profile images"**  
-  This is informational - your PDF has complex color profiles.
-  Compression will take slightly longer but colors will be preserved.
-  If you see "WARNING: ImageMagick helper unavailable", install ImageMagick.
+  This is informational - your PDF has complex color profiles.   Compression will take slightly longer but colors will be preserved.   If you see "WARNING: ImageMagick helper unavailable", install ImageMagick.
 
 
 ---
