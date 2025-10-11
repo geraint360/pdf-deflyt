@@ -1,9 +1,9 @@
-# Makefile for pdf-squeeze project + DEVONthink scripts
+# Makefile for pdf-deflyt project + DEVONthink scripts
 # Typical use
-# cd pdf-squeeze
-# make install-bin        # installs ./pdf-squeeze → ~/bin/pdf-squeeze (default)
+# cd pdf-deflyt
+# make install-bin        # installs ./pdf-deflyt → ~/bin/pdf-deflyt (default)
 # make compile            # compiles .applescript → .scpt into devonthink-scripts/compiled
-# make install-dt         # copies compiled .scpt into DEVONthink’s App Scripts folder
+# make install-dt         # copies compiled .scpt into DEVONthink's App Scripts folder
 # or do both:
 # make install            # = install-bin + install-dt
 SHELL := /bin/bash
@@ -18,7 +18,7 @@ BUILD_DIR      := tests/build
 # DEVONthink version: 4 (default) or 3
 DT_VER ?= 4
 
-# Destination for pdf-squeeze
+# Destination for pdf-deflyt
 BIN_DIR ?= $(HOME)/bin
 
 ifeq ($(DT_VER),4)
@@ -40,7 +40,7 @@ DT_RULES   := $(DT_SCRIPTS_DIR)/Smart Rules
 .PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  install-bin   Install ./pdf-squeeze -> ~/bin/pdf-squeeze"
+	@echo "  install-bin   Install ./pdf-deflyt -> ~/bin/pdf-deflyt"
 	@echo "  compile       Compile AppleScripts -> devonthink-scripts/compiled"
 	@echo "  install-dt    Copy compiled .scpt into DEVONthink App Scripts"
 	@echo "  install       install-bin + install-dt"
@@ -81,24 +81,26 @@ install-dt: compile
 		cp -f "$(COMPILED_DIR)/Compress PDF Now.scpt" "$(DT_MENU)/"; \
 		echo "  ✓ Compress PDF Now.scpt → Menu"; \
 	fi
-	@if [ -f "$(COMPILED_DIR)/PDF Squeeze (Smart Rule).scpt" ]; then \
-		cp -f "$(COMPILED_DIR)/PDF Squeeze (Smart Rule).scpt" "$(DT_RULES)/"; \
-		echo "  ✓ PDF Squeeze (Smart Rule).scpt → Smart Rules"; \
+	@if [ -f "$(COMPILED_DIR)/PDF Deflyt (Smart Rule).scpt" ]; then \
+		cp -f "$(COMPILED_DIR)/PDF Deflyt (Smart Rule).scpt" "$(DT_RULES)/"; \
+		echo "  ✓ PDF Deflyt (Smart Rule).scpt → Smart Rules"; \
 	fi
 	@echo "Done: installed to DEVONthink scripts folders."
 
 uninstall-dt:
 	@rm -f "$(DT_MENU_DIR)/Compress PDF Now.scpt" \
-	       "$(DT_SMART_DIR)/PDF Squeeze (Smart Rule).scpt" || true
+	       "$(DT_SMART_DIR)/PDF Deflyt (Smart Rule).scpt" || true
 	@echo "Removed DT scripts from:"
 	@echo "  • $(DT_MENU_DIR)"
 	@echo "  • $(DT_SMART_DIR)"
 
-# Install pdf-squeeze into ~/bin (create if missing)
+# Install pdf-deflyt into ~/bin (create if missing)
 install-bin:
 	@mkdir -p "$(BIN_DIR)"
-	@install -m 0755 pdf-squeeze "$(BIN_DIR)/pdf-squeeze"
-	@echo "Installed to $(BIN_DIR)/pdf-squeeze"
+	@install -m 0755 pdf-deflyt "$(BIN_DIR)/pdf-deflyt"
+	@install -m 0755 pdf-deflyt-image-recompress "$(BIN_DIR)/pdf-deflyt-image-recompress"
+	@echo "Installed to $(BIN_DIR)/pdf-deflyt"
+	@echo "Installed to $(BIN_DIR)/pdf-deflyt-image-recompress"
 	@case ":$(PATH):" in *:"$(BIN_DIR)":*) ;; *) echo 'NOTE: add $(BIN_DIR) to your PATH';; esac
 
 clean:

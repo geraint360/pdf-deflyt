@@ -1,9 +1,9 @@
 -- PDF Squeeze for DEVONthink 4
--- Purpose: Compress the currently selected PDFs in DEVONthink using ~/bin/pdf-squeeze
+-- Purpose: Compress the currently selected PDFs in DEVONthink using ~/bin/pdf-deflyt
 -- Put into ~/Library/Application Scripts/com.devon-technologies.think/Menu
--- Logging: ~/Library/Logs/pdf-squeeze.log
+-- Logging: ~/Library/Logs/pdf-deflyt.log
 
-property LOG_HFS : ((path to library folder from user domain) as text) & "Logs:pdf-squeeze.log"
+property LOG_HFS : ((path to library folder from user domain) as text) & "Logs:pdf-deflyt.log"
 property DEBUG_MODE : false
 
 on logMsg(m)
@@ -32,33 +32,33 @@ on logMsg(m)
 end logMsg
 
 on findTool()
-	-- collect env info with a safe PATH and log it to ~/Library/Logs/pdf-squeeze.log
+	-- collect env info with a safe PATH and log it to ~/Library/Logs/pdf-deflyt.log
 	set envPATH to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; printf %s \"$PATH\"'"
 	set whichPdfcpu to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdfcpu || true'"
-	set whichSqueeze to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdf-squeeze || true'"
+	set whichSqueeze to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdf-deflyt || true'"
 	
 	if DEBUG_MODE then
 		my logMsg("DEBUG PATH=" & envPATH)
 		my logMsg("DEBUG which pdfcpu=" & whichPdfcpu)
-		my logMsg("DEBUG which pdf-squeeze=" & whichSqueeze)
+		my logMsg("DEBUG which pdf-deflyt=" & whichSqueeze)
 	end if
 	
-	-- now resolve pdf-squeeze with the same safe PATH
+	-- now resolve pdf-deflyt with the same safe PATH
 	set sh to "
     export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-    if [ -x \"$HOME/bin/pdf-squeeze\" ]; then
-      echo \"$HOME/bin/pdf-squeeze\";
-    elif command -v pdf-squeeze >/dev/null 2>&1; then
-      command -v pdf-squeeze;
-    elif [ -x /opt/homebrew/bin/pdf-squeeze ]; then
-      echo /opt/homebrew/bin/pdf-squeeze;
-    elif [ -x /usr/local/bin/pdf-squeeze ]; then
-      echo /usr/local/bin/pdf-squeeze;
+    if [ -x \"$HOME/bin/pdf-deflyt\" ]; then
+      echo \"$HOME/bin/pdf-deflyt\";
+    elif command -v pdf-deflyt >/dev/null 2>&1; then
+      command -v pdf-deflyt;
+    elif [ -x /opt/homebrew/bin/pdf-deflyt ]; then
+      echo /opt/homebrew/bin/pdf-deflyt;
+    elif [ -x /usr/local/bin/pdf-deflyt ]; then
+      echo /usr/local/bin/pdf-deflyt;
     else
       echo '';
     fi"
 	set p to do shell script sh
-	if p is "" then error "pdf-squeeze not found. Put it in ~/bin or install via Homebrew."
+	if p is "" then error "pdf-deflyt not found. Put it in ~/bin or install via Homebrew."
 	return p
 end findTool
 
@@ -111,7 +111,7 @@ tell application id "DNtp" -- DEVONthink 4
 			end if
 		on error errMsg number errNum
 			my logMsg("ERROR on record '" & (name of r as rich text) & "': " & errMsg & " (" & errNum & ")")
-			display notification errMsg with title "pdf-squeeze" subtitle (name of r)
+			display notification errMsg with title "pdf-deflyt" subtitle (name of r)
 		end try
 	end repeat
 end tell

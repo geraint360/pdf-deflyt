@@ -1,2 +1,5 @@
 devonthink-scripts/compiled/
 .DS_Store
+
+# Claude Code configuration (local only)
+CLAUDE.md

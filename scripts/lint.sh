@@ -13,8 +13,8 @@ FIX="${FIX:-1}"
 
 # --- zsh syntax check (quiet unless error) ---
 # Only if the zsh entrypoint exists.
-if [[ -f "$ROOT/pdf-squeeze" ]]; then
-  zsh -n "$ROOT/pdf-squeeze"
+if [[ -f "$ROOT/pdf-deflyt" ]]; then
+  zsh -n "$ROOT/pdf-deflyt"
 fi
 
 # --- format bash test scripts (shfmt) ---

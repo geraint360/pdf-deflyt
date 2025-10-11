@@ -21,7 +21,7 @@ need() { command -v "$1" > /dev/null 2>&1 || {
 }; }
 need pdfcpu
 need qpdf
-need "$ROOT/pdf-squeeze"
+need "$ROOT/pdf-deflyt"
 # We don't require magick; sips is bundled on macOS
 
 # Load fixture builders (creates assets)
@@ -38,7 +38,7 @@ cases_serial=()
 # 1) -o honored + basic compression for each preset
 for pre in light standard extreme lossless archive; do
   out="$BUILD_DIR/out-${pre}.pdf"
-  cases+=("o_${pre}::$ROOT/pdf-squeeze -p $pre \"$ASSETS_DIR/mixed.pdf\" -o \"$out\" && \
+  cases+=("o_${pre}::$ROOT/pdf-deflyt -p $pre \"$ASSETS_DIR/mixed.pdf\" -o \"$out\" && \
            [[ -f \"$out\" ]] && echo ok")
 done
 
@@ -71,7 +71,7 @@ chmod +x "$BUILD_DIR/strength_order_body.sh"
 cases_serial+=("strength_order::bash \"$BUILD_DIR/strength_order_body.sh\"")
 
 # 3) --dry-run shows estimate
-cases+=("dry_run::$ROOT/pdf-squeeze --dry-run -p standard \"$ASSETS_DIR/mixed.pdf\" | grep -E 'DRY: .+ est_savings≈.+%  est_size≈.+\\(from'")
+cases+=("dry_run::$ROOT/pdf-deflyt --dry-run -p standard \"$ASSETS_DIR/mixed.pdf\" | grep -E 'DRY: .+ est_savings≈.+%  est_size≈.+\\(from'")
 
 # 4) --inplace preserves mtime and reduces size (on imagey file)
 
@@ -79,7 +79,7 @@ cases+=("dry_run::$ROOT/pdf-squeeze --dry-run -p standard \"$ASSETS_DIR/mixed.pd
 cases+=("min_gain_skip::bash -lc '
   in=\"\$ASSETS_DIR/structural.pdf\"
   out=\"\$BUILD_DIR/mgain.pdf\"
-  msg=\$(\"\$ROOT/pdf-squeeze\" -p lossless --min-gain 50 \"\$in\" -o \"\$out\" 2>&1 || true)
+  msg=\$(\"\$ROOT/pdf-deflyt\" -p lossless --min-gain 50 \"\$in\" -o \"\$out\" 2>&1 || true)
   a=\$(stat -f%z \"\$in\")
   b=\$(stat -f%z \"\$out\" 2>/dev/null || echo 0)
   if echo \"\$msg\" | grep -q \"kept-original\"; then
@@ -96,9 +96,9 @@ cases+=("skip_if_smaller::bash -lc '
   tiny=\"\$ASSETS_DIR/structural.pdf\"
   rm -f \"\$BUILD_DIR/skip.pdf\"
   out=\"\$BUILD_DIR/skip.pdf\"
-  msg=\$(\"\$ROOT/pdf-squeeze\" --skip-if-smaller 5MB \"\$tiny\" -o \"\$out\" 2>&1 || true)
+  msg=\$(\"\$ROOT/pdf-deflyt\" --skip-if-smaller 5MB \"\$tiny\" -o \"\$out\" 2>&1 || true)
   if ! echo \"\$msg\" | grep -q \"SKIP (too small\"; then
-    msg=\$(\"\$ROOT/pdf-squeeze\" --skip-if-smaller 5m \"\$tiny\" -o \"\$out\" 2>&1 || true)
+    msg=\$(\"\$ROOT/pdf-deflyt\" --skip-if-smaller 5m \"\$tiny\" -o \"\$out\" 2>&1 || true)
   fi
   echo \"\$msg\" | grep -E \"SKIP \\(too small\" >/dev/null && [ ! -f \"\$out\" ]
 '")
@@ -115,7 +115,7 @@ ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 logdir="$BUILD_DIR/logs"
 mkdir -p "$logdir"
 
-echo "pdf-squeeze: $("$ROOT/pdf-squeeze" --version 2>/dev/null || echo unknown)" >&2
+echo "pdf-deflyt: $("$ROOT/pdf-deflyt" --version 2>/dev/null || echo unknown)" >&2
 
 # Fresh fixture dirs
 rm -rf "$BUILD_DIR/filters"
@@ -126,15 +126,15 @@ cp "$ASSETS_DIR/gray.pdf" "$BUILD_DIR/filters/B/b.pdf"
 A="$BUILD_DIR/filters/A/a.pdf"
 B="$BUILD_DIR/filters/B/b.pdf"
 
-# Phase 1: default (non-inplace) — expect A/a_squeezed.pdf created, B untouched.
-"$ROOT/pdf-squeeze" -p light --min-gain 0 --recurse \
+# Phase 1: default (non-inplace) — expect A/a_deflyt.pdf created, B untouched.
+"$ROOT/pdf-deflyt" -p light --min-gain 0 --recurse \
   --include 'A/' --exclude 'B/' "$BUILD_DIR/filters" --jobs 1 >"$logdir/filters_phase1.stdout" 2>&1 || true
 
 # Save a tree snapshot for diagnostics
 ( cd "$BUILD_DIR/filters" && /bin/ls -lR ) > "$BUILD_DIR/filters_tree.txt" 2>/dev/null || true
 
-A_out="$BUILD_DIR/filters/A/a_squeezed.pdf"
-B_out="$BUILD_DIR/filters/B/b_squeezed.pdf"
+A_out="$BUILD_DIR/filters/A/a_deflyt.pdf"
+B_out="$BUILD_DIR/filters/B/b_deflyt.pdf"
 
 # Assert: output for A exists; output for B must not
 [ -f "$A_out" ] || { echo "Expected $A_out to exist (non-inplace)"; exit 1; }
@@ -154,7 +154,7 @@ a0=$(stat -f%z "$A"); am0=$(stat -f%m "$A")
 b0=$(stat -f%z "$B"); bm0=$(stat -f%m "$B")
 
 # Run inplace. We keep --min-gain 0 to strongly encourage rewriting, but tolerate engines that skip if larger.
-"$ROOT/pdf-squeeze" -p light --min-gain 0 --inplace --recurse \
+"$ROOT/pdf-deflyt" -p light --min-gain 0 --inplace --recurse \
   --include 'A/' --exclude 'B/' "$BUILD_DIR/filters" --jobs 1 >"$logdir/filters_phase2.stdout" 2>&1 || true
 
 a1=$(stat -f%z "$A"); am1=$(stat -f%m "$A")
@@ -162,7 +162,7 @@ b1=$(stat -f%z "$B"); bm1=$(stat -f%m "$B")
 
 # A must be either rewritten OR explicitly skipped by the engine.
 if [ "$a1" -eq "$a0" ] && [ "$am1" -eq "$am0" ]; then
-  # Acceptable if pdf-squeeze told us it kept the original.
+  # Acceptable if pdf-deflyt told us it kept the original.
   if ! grep -q "kept-original" "$logdir/filters_phase2.stdout"; then
     echo "A not processed in --inplace (and no kept-original message): size=$a0->${a1}, mtime=$am0->${am1}"
     exit 1
@@ -173,9 +173,9 @@ fi
 [ "$b1" -eq "$b0" ] || { echo "B size changed but excluded: $b0 -> $b1"; exit 1; }
 [ "$bm1" -eq "$bm0" ] || { echo "B mtime changed but excluded: $bm0 -> $bm1"; exit 1; }
 
-# And no *_squeezed artifacts should exist when --inplace is used
-if find "$BUILD_DIR/filters" -name '*_squeezed.pdf' -print -quit | grep -q . ; then
-  echo "Unexpected *_squeezed.pdf artifacts in inplace mode"
+# And no *_deflyt artifacts should exist when --inplace is used
+if find "$BUILD_DIR/filters" -name '*_deflyt.pdf' -print -quit | grep -q . ; then
+  echo "Unexpected *_deflyt.pdf artifacts in inplace mode"
   exit 1
 fi
 FB
@@ -200,10 +200,10 @@ mt0=$(stat -f %m "$tmp") || mt0=0
 sz0=$(stat -f %z "$tmp") || sz0=0
 
 # Run inplace
-"$ROOT/pdf-squeeze" -p standard --min-gain 0 --inplace "$tmp"
+"$ROOT/pdf-deflyt" -p standard --min-gain 0 --inplace "$tmp"
 rc=$?
 set -e
-[ $rc -eq 0 ] || { echo "pdf-squeeze failed rc=$rc"; exit 1; }
+[ $rc -eq 0 ] || { echo "pdf-deflyt failed rc=$rc"; exit 1; }
 
 sz1=$(stat -f %z "$tmp") || sz1=$sz0
 mt1=$(stat -f %m "$tmp") || mt1=$mt0
@@ -235,7 +235,7 @@ ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 in="$BUILD_DIR/Input With Spaces.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$in"
 out="$BUILD_DIR/Output With Spaces.pdf"
-"$ROOT/pdf-squeeze" -p light "$in" -o "$out" >/dev/null
+"$ROOT/pdf-deflyt" -p light "$in" -o "$out" >/dev/null
 [ -f "$out" ] || { echo "missing output with spaces"; exit 1; }
 SP
 chmod +x "$BUILD_DIR/space_paths.sh"
@@ -251,7 +251,7 @@ BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
 ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 
 out="$BUILD_DIR/q.pdf"
-msg=$("$ROOT/pdf-squeeze" -p light "$ASSETS_DIR/mixed.pdf" -o "$out" --quiet 2>&1 || true)
+msg=$("$ROOT/pdf-deflyt" -p light "$ASSETS_DIR/mixed.pdf" -o "$out" --quiet 2>&1 || true)
 [ -f "$out" ] && ! echo "${msg:-}" | grep -q '^→ '
 QB
 chmod +x "$BUILD_DIR/quiet_body.sh"
@@ -279,24 +279,24 @@ for f in "$BUILD_DIR/many"/*.pdf; do
 done
 
 # Invoke with explicit file list so bash expands the glob here.
-# This avoids whatever recursion check in pdf-squeeze is flagging the files as unreadable.
-"$ROOT/pdf-squeeze" -p light --min-gain 0 --jobs 4 \
+# This avoids whatever recursion check in pdf-deflyt is flagging the files as unreadable.
+"$ROOT/pdf-deflyt" -p light --min-gain 0 --jobs 4 \
   "$BUILD_DIR/many"/*.pdf \
   >"$BUILD_DIR/logs/jobs_parallel.stdout" 2>&1
 
-# Expect 6 outputs with _squeezed in the same folder
-cnt=$(find "$BUILD_DIR/many" -name '*_squeezed.pdf' | wc -l | tr -d ' ')
+# Expect 6 outputs with _deflyt in the same folder
+cnt=$(find "$BUILD_DIR/many" -name '*_deflyt.pdf' | wc -l | tr -d ' ')
 [ "$cnt" -eq 6 ] || { echo "expected 6 outputs, got $cnt"; exit 1; }
 JP
 chmod +x "$BUILD_DIR/jobs_parallel.sh"
 # keep cases+=("jobs_parallel::bash \"$BUILD_DIR/jobs_parallel.sh\"")
 
-# (D) default naming rule (_squeezed, same extension)
+# (D) default naming rule (_deflyt, same extension)
 cases+=("default_naming_rule::bash -lc '
   in=\"\$BUILD_DIR/defname.pdf\"
   cp \"\$ASSETS_DIR/mixed.pdf\" \"\$in\"
-  \"$ROOT/pdf-squeeze\" -p light \"\$in\" >/dev/null
-  [ -f \"\${in%.pdf}_squeezed.pdf\" ]
+  \"$ROOT/pdf-deflyt\" -p light \"\$in\" >/dev/null
+  [ -f \"\${in%.pdf}_deflyt.pdf\" ]
 '")
 
 # (E) recurse + include/exclude on nested dirs
@@ -313,9 +313,9 @@ rm -rf "$base"
 mkdir -p "$base/A/AA" "$base/B/BB"
 cp "$ASSETS_DIR/mixed.pdf" "$base/A/AA/a.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$base/B/BB/b.pdf"
-"$ROOT/pdf-squeeze" -p light --min-gain 0 --recurse --include '/A/' --exclude '/B/' "$base" --jobs 1 >/dev/null 2>&1
-[ -f "$base/A/AA/a_squeezed.pdf" ] || { echo "A missing"; exit 1; }
-[ ! -f "$base/B/BB/b_squeezed.pdf" ] || { echo "B should be excluded"; exit 1; }
+"$ROOT/pdf-deflyt" -p light --min-gain 0 --recurse --include '/A/' --exclude '/B/' "$base" --jobs 1 >/dev/null 2>&1
+[ -f "$base/A/AA/a_deflyt.pdf" ] || { echo "A missing"; exit 1; }
+[ ! -f "$base/B/BB/b_deflyt.pdf" ] || { echo "B should be excluded"; exit 1; }
 DF
 chmod +x "$BUILD_DIR/depth_filters.sh"
 cases+=("depth_filters::bash \"$BUILD_DIR/depth_filters.sh\"")
@@ -331,7 +331,7 @@ ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
 
 in="$ASSETS_DIR/structural.pdf"
 out="$BUILD_DIR/tiny.pdf"
-msg=$("$ROOT/pdf-squeeze" -p standard --min-gain 50 "$in" -o "$out" 2>&1 || true)
+msg=$("$ROOT/pdf-deflyt" -p standard --min-gain 50 "$in" -o "$out" 2>&1 || true)
 # Either we saw "kept-original", or the output size equals input (or out absent -> 0).
 if echo "$msg" | grep -q "kept-original"; then
   exit 0
@@ -344,7 +344,7 @@ cases+=("min_gain_tiny::bash \"$BUILD_DIR/min_gain_tiny.sh\"")
 
 # (G) version format smoke test
 cases+=("version_smoke::bash -lc '
-  \"$ROOT/pdf-squeeze\" --version | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+|pdf-squeeze: \"
+  \"$ROOT/pdf-deflyt\" --version | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+|pdf-deflyt: \"
 '")
 
 # (H) non-PDF skip (don't crash)
@@ -360,9 +360,9 @@ d="$BUILD_DIR/mixed_tree"
 rm -rf "$d"; mkdir -p "$d"
 cp "$ASSETS_DIR/mixed.pdf" "$d/ok.pdf"
 echo "hello" > "$d/note.txt"
-"$ROOT/pdf-squeeze" --recurse "$d" --jobs 1 >/dev/null 2>&1 || true
-[ -f "$d/ok_squeezed.pdf" ] || { echo "pdf not processed"; exit 1; }
-[ ! -f "$d/note_squeezed.pdf" ] || { echo "non-pdf should not be processed"; exit 1; }
+"$ROOT/pdf-deflyt" --recurse "$d" --jobs 1 >/dev/null 2>&1 || true
+[ -f "$d/ok_deflyt.pdf" ] || { echo "pdf not processed"; exit 1; }
+[ ! -f "$d/note_deflyt.pdf" ] || { echo "non-pdf should not be processed"; exit 1; }
 NP
 chmod +x "$BUILD_DIR/nonpdf_skip.sh"
 cases+=("nonpdf_skip::bash \"$BUILD_DIR/nonpdf_skip.sh\"")
@@ -385,9 +385,9 @@ qpdf --encrypt test123 test123 256 -- "$in_plain" "$enc"
 
 # --- A) No password: accept EITHER an explicit SKIP or a kept-original pass-through ---
 out_no="$BUILD_DIR/enc_no_pw.pdf"
-rm -f "$out_no" "$BUILD_DIR/enc_no_pw_squeezed.pdf"
+rm -f "$out_no" "$BUILD_DIR/enc_no_pw_deflyt.pdf"
 
-msg=$("$ROOT/pdf-squeeze" -p light "$enc" -o "$out_no" 2>&1 || true)
+msg=$("$ROOT/pdf-deflyt" -p light "$enc" -o "$out_no" 2>&1 || true)
 
 # Case 1: tool says it's skipping due to encryption/password
 if echo "$msg" | grep -qiE 'SKIP.*(encrypted|password)'; then
@@ -396,10 +396,10 @@ if echo "$msg" | grep -qiE 'SKIP.*(encrypted|password)'; then
 else
   # Case 2: tool didn’t skip; it produced an output but kept original
   echo "$msg" | grep -q 'kept-original'  # must acknowledge pass-through
-  # Output can be exactly -o path OR (depending on tool behavior) a *_squeezed.pdf
+  # Output can be exactly -o path OR (depending on tool behavior) a *_deflyt.pdf
   if [ -f "$out_no" ]; then
     : # ok
-  elif [ -f "$BUILD_DIR/enc_no_pw_squeezed.pdf" ]; then
+  elif [ -f "$BUILD_DIR/enc_no_pw_deflyt.pdf" ]; then
     : # ok
   else
     echo "Expected an output file in no-password mode" >&2
@@ -410,14 +410,14 @@ fi
 # --- B) With password: must succeed and write an output file ---
 out_yes="$BUILD_DIR/enc_with_pw.pdf"
 rm -f "$out_yes"
-"$ROOT/pdf-squeeze" -p light --password test123 "$enc" -o "$out_yes" >/dev/null
+"$ROOT/pdf-deflyt" -p light --password test123 "$enc" -o "$out_yes" >/dev/null
 [ -f "$out_yes" ] || { echo "Missing output with password"; exit 1; }
 
 ENCRYPT
 chmod +x "$BUILD_DIR/encrypted_body.sh"
 
 # (J) CSV logging (only if the binary supports --csv)
-if "$ROOT/pdf-squeeze" --help 2>&1 | grep -q -- ' --csv'; then
+if "$ROOT/pdf-deflyt" --help 2>&1 | grep -q -- ' --csv'; then
   cat >"$BUILD_DIR/csv_body.sh" <<'CSV'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -436,7 +436,7 @@ cp "$ASSETS_DIR/mono.pdf" "$d/in_3.pdf"
 csv="$BUILD_DIR/report.csv"
 rm -f "$csv"
 
-"$ROOT/pdf-squeeze" -p light --csv "$csv" "$d" --jobs 2 >/dev/null
+"$ROOT/pdf-deflyt" -p light --csv "$csv" "$d" --jobs 2 >/dev/null
 
 [ -f "$csv" ]
 inputs=$(find "$d" -name '*.pdf' | wc -l | tr -d ' ')

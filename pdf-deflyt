@@ -2,7 +2,7 @@
 set -e
 set -o pipefail
 
-# pdf-squeeze v2.3.0-zsh
+# pdf-deflyt v2.3.0-zsh
 # - Auto-tuned compression via image PPI analysis
 # - Presets: light / standard / extreme / aggressive / lossless / archive
 # - Batch + recurse + parallel processing
@@ -15,7 +15,7 @@ set -o pipefail
 #
 # For ICC profile image support:
 #   - ImageMagick is required (brew install imagemagick)
-#   - Helper script pdf-squeeze-image-recompress must be in same directory
+#   - Helper script pdf-deflyt-image-recompress must be in same directory
 #   - Python dependencies are auto-managed by the helper (no manual setup)
 
 version="2.3.0-zsh"
@@ -23,7 +23,7 @@ version="2.3.0-zsh"
 usage() {
   cat <<'EOF'
 Usage:
-  pdf-squeeze [OPTIONS] INPUT...
+  pdf-deflyt [OPTIONS] INPUT...
 
 Presets:
   -p standard   (default) Auto-tuned per-PDF targets
@@ -369,16 +369,16 @@ gs_pass() {
 
 python_recompress_images() {
   local in="$1" out="$2" jpegq="$3"
-  
+
   local helper=""
   local script_dir="$(cd "$(dirname "${(%):-%N}")" && pwd)"
-  
-  if [[ -x "$script_dir/pdf-squeeze-image-recompress" ]]; then
-    helper="$script_dir/pdf-squeeze-image-recompress"
-  elif [[ -x "./pdf-squeeze-image-recompress" ]]; then
-    helper="./pdf-squeeze-image-recompress"
-  elif command -v pdf-squeeze-image-recompress >/dev/null 2>&1; then
-    helper="pdf-squeeze-image-recompress"
+
+  if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
+    helper="$script_dir/pdf-deflyt-image-recompress"
+  elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
+    helper="./pdf-deflyt-image-recompress"
+  elif command -v pdf-deflyt-image-recompress >/dev/null 2>&1; then
+    helper="pdf-deflyt-image-recompress"
   else
     return 1
   fi
@@ -453,7 +453,7 @@ process_one() {
   local orig="$IN"
   local base="${IN%.*}"
   if [[ -z "$OUT_REQ" ]]; then
-    local default_out="${base}_squeezed.pdf"
+    local default_out="${base}_deflyt.pdf"
     OUT="$(unique_filename "$default_out")"
   else
     OUT="$OUT_REQ"
@@ -637,7 +637,7 @@ run_wrapper() {
   fi
 
   if [[ "${DRYRUN:-false}" == true ]]; then
-    local tmp1="$(mktemp -t pdfsqueeze.dry.XXXXXX)"
+    local tmp1="$(mktemp -t pdfdeflyt.dry.XXXXXX)"
     local ORIG_BYTES=$(size_of "$f")
 
     pdfcpu optimize -quiet "$f" "$tmp1" >/dev/null 2>&1 || cp "$f" "$tmp1" || { echo "DRY: $f (unreadable)"; return 0; }

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# pdf-squeeze installer (macOS + Linux)
+# pdf-deflyt installer (macOS + Linux)
 # - Installs Homebrew on macOS (if missing)
 # - Installs deps (gs, pdfcpu, qpdf, exiftool, poppler, coreutils, mutool, imagemagick, parallel*)
-# - Installs pdf-squeeze and pdf-squeeze-image-recompress helper to ~/bin (override with --prefix)
+# - Installs pdf-deflyt and pdf-deflyt-image-recompress helper to ~/bin (override with --prefix)
 # - Installs DEVONthink scripts on macOS (DT4/DT3) only when --with-devonthink is passed
 # - Supports: --no-parallel, --no-imagemagick, --verify-only, --uninstall
 #
 # Usage:
-# curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash
 #
-REPO_RAW="https://raw.githubusercontent.com/geraint360/pdf-squeeze/main"
+REPO_RAW="https://raw.githubusercontent.com/geraint360/pdf-deflyt/main"
 PDFCPU_VERSION="0.11.0"   # linux fallback download if no package is available
 
 PREFIX_DEFAULT="$HOME/bin"
@@ -34,7 +34,7 @@ Usage: $0 [options]
 Options:
   --with-devonthink   Install DEVONthink scripts on macOS
   --dt {auto|3|4}     Target DEVONthink version on macOS (default: auto)
-  --prefix PATH       Where to install pdf-squeeze (default: $PREFIX_DEFAULT)
+  --prefix PATH       Where to install pdf-deflyt (default: $PREFIX_DEFAULT)
   --no-parallel       Do not install GNU parallel
   --no-imagemagick    Do not install ImageMagick (ICC profile support will be unavailable)
   --verify-only       Check installation status without making changes
@@ -355,16 +355,16 @@ download_to() {
 install_files() {
   ensure_dirs
   
-  # Install main pdf-squeeze script
-  local bin_dst="$INSTALL_PREFIX/pdf-squeeze"
-  log "[get] Installing pdf-squeeze -> $bin_dst"
-  download_to "$REPO_RAW/pdf-squeeze" "$bin_dst"
+  # Install main pdf-deflyt script
+  local bin_dst="$INSTALL_PREFIX/pdf-deflyt"
+  log "[get] Installing pdf-deflyt -> $bin_dst"
+  download_to "$REPO_RAW/pdf-deflyt" "$bin_dst"
   chmod +x "$bin_dst"
   
   # Install helper script for ICC profile images
-  local helper_dst="$INSTALL_PREFIX/pdf-squeeze-image-recompress"
-  log "[get] Installing pdf-squeeze-image-recompress -> $helper_dst"
-  download_to "$REPO_RAW/pdf-squeeze-image-recompress" "$helper_dst"
+  local helper_dst="$INSTALL_PREFIX/pdf-deflyt-image-recompress"
+  log "[get] Installing pdf-deflyt-image-recompress -> $helper_dst"
+  download_to "$REPO_RAW/pdf-deflyt-image-recompress" "$helper_dst"
   chmod +x "$helper_dst"
 
   if on_macos && [[ $INSTALL_DT -eq 1 ]]; then
@@ -375,9 +375,9 @@ install_files() {
 
 uninstall_everything() {
   local removed=0
-  local bin_dst="$INSTALL_PREFIX/pdf-squeeze"
-  local helper_dst="$INSTALL_PREFIX/pdf-squeeze-image-recompress"
-  local venv_dir="$INSTALL_PREFIX/.pdf-squeeze-venv"
+  local bin_dst="$INSTALL_PREFIX/pdf-deflyt"
+  local helper_dst="$INSTALL_PREFIX/pdf-deflyt-image-recompress"
+  local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
   
   if [[ -f "$bin_dst" ]]; then rm -f "$bin_dst"; log "[rm] $bin_dst"; removed=1; fi
   if [[ -f "$helper_dst" ]]; then rm -f "$helper_dst"; log "[rm] $helper_dst"; removed=1; fi
@@ -403,12 +403,12 @@ uninstall_everything() {
 }
 
 verify_report() {
-  echo "=== pdf-squeeze installation report ==="
+  echo "=== pdf-deflyt installation report ==="
   echo "OS: $(uname -s) ($(uname -m))"
   echo
   echo "Core scripts:"
-  echo "  pdf-squeeze: $(command -v pdf-squeeze || echo 'not on PATH')"
-  echo "  helper: $(command -v pdf-squeeze-image-recompress || echo 'not on PATH')"
+  echo "  pdf-deflyt: $(command -v pdf-deflyt || echo 'not on PATH')"
+  echo "  helper: $(command -v pdf-deflyt-image-recompress || echo 'not on PATH')"
   echo
   echo "Required dependencies:"
   echo "  ghostscript: $(command -v gs || echo 'MISSING')"
@@ -493,7 +493,7 @@ verify_report() {
   
   echo
   echo "Python environment for helper:"
-  local venv_dir="$INSTALL_PREFIX/.pdf-squeeze-venv"
+  local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
   if [[ -d "$venv_dir" ]]; then
     echo "  Virtual env: $venv_dir (PyMuPDF installed)"
   else
@@ -529,7 +529,7 @@ main() {
   verify_report
   log "[install] Complete."
   log
-  log "Run 'pdf-squeeze --check-deps' to verify all dependencies."
+  log "Run 'pdf-deflyt --check-deps' to verify all dependencies."
 }
 
 main "$@"

@@ -1,6 +1,6 @@
-# pdf-squeeze
+# pdf-deflyt
 
-A fast PDF size reducer for macOS and Linux. Targets **material** file-size savings while keeping documents readable and searchable. Ships as a single script (`pdf-squeeze`, **zsh**) with pragmatic defaults, safety rails, and first-class batch support.
+A fast PDF size reducer for macOS and Linux. Targets **material** file-size savings while keeping documents readable and searchable. Ships as a single script (`pdf-deflyt`, **zsh**) with pragmatic defaults, safety rails, and first-class batch support.
 
 > Typical savings on mixed documents are **20–70%**, depending on content and preset. See **Presets** and **Examples** below.
 
@@ -8,7 +8,7 @@ A fast PDF size reducer for macOS and Linux. Targets **material** file-size savi
 
 ## Features
 
-- Simple CLI: `pdf-squeeze input.pdf -o output.pdf` (or compress in place with `--inplace`)
+- Simple CLI: `pdf-deflyt input.pdf -o output.pdf` (or compress in place with `--inplace`)
 - Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**, **archive**
 - **ICC profile support**: Automatically detects and handles complex color profiles using ImageMagick
 - Batch processing (files or folders), recursion, include/exclude filters, and parallel jobs
@@ -16,14 +16,14 @@ A fast PDF size reducer for macOS and Linux. Targets **material** file-size savi
 - Skip rules to avoid work on tiny files or when savings would be negligible
 - Timestamp‑friendly: preserves file date and time for in‑place operations (APFS granularity tolerated)
 - Optional password handling for encrypted PDFs (`--password`); otherwise it will **skip or pass‑through** safely
-- Deterministic behavior and stable output naming (`*_squeezed.pdf`), unless `-o`/`--inplace` is used
+- Deterministic behavior and stable output naming (`*_deflyt.pdf`), unless `-o`/`--inplace` is used
 - Integrations with DEVONthink 3 and 4
 
 ---
 
 ## Installation
 
-`pdf-squeeze` and the associated installer should run on both macOS and Linux. The installer is the same for both.
+`pdf-deflyt` and the associated installer should run on both macOS and Linux. The installer is the same for both.
 
 Re-running the installer should update with the latest version from the repo.
 
@@ -34,10 +34,10 @@ Please note that the **Linux version has not been tested**. It should work. It m
 Copy and paste this into a Terminal window:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh | bash
+curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash
 ```
 
-- Installs `pdf-squeeze` to `~/bin` (default; override with `--prefix /path`).
+- Installs `pdf-deflyt` to `~/bin` (default; override with `--prefix /path`).
 
 - Installs required dependencies automatically via **Homebrew** (macOS) or your package manager (Linux e.g. **apt**, **dnf**, or **brew** if present).
 
@@ -54,15 +54,15 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts
 
 - `sudo` may be required for installing dependencies on some distributions.  
 
-- The pdf-squeeze CLI works the same across macOS and Linux.
+- The pdf-deflyt CLI works the same across macOS and Linux.
 
 
 **Optional: Install DEVONthink scripts (macOS only)**  
 
-If you want the DEVONthink integration (the Compress PDF Now and PDF Squeeze (Smart Rule) scripts), use:
+If you want the DEVONthink integration (the Compress PDF Now and PDF Deflyt (Smart Rule) scripts), use:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh \
+curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh \
   | bash -s -- --with-devonthink
 ```
 
@@ -79,11 +79,11 @@ Uninstallation is the same on macOS and Linux. If you installed the DEVONthink s
 Copy and paste this into a Terminal window:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash -s -- --uninstall
 ```
 Verify current setup (paths and tools):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts/install-pdf-squeeze.sh | bash -s -- --verify-only
+curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash -s -- --verify-only
 ```
 
 ---
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/scripts
 ## Usage
 
 ```bash
-pdf-squeeze [options] <file-or-dir>...
+pdf-deflyt [options] <file-or-dir>...
 ```
 
 ### Common Options
@@ -102,7 +102,7 @@ pdf-squeeze [options] <file-or-dir>...
 
 - `-o, --output <file>`  
   Explicit output file (single input only).  
-  If omitted, uses default naming (`*_squeezed.pdf`).
+  If omitted, uses default naming (`*_deflyt.pdf`).
 
 - `--inplace`  
   Compress and overwrite the input file.  
@@ -140,7 +140,7 @@ pdf-squeeze [options] <file-or-dir>...
   Show version or usage.
 
 **Output naming:**  
-If neither `-o` nor `--inplace` is used, results are written next to the input as: `*_squeezed.pdf`.
+If neither `-o` nor `--inplace` is used, results are written next to the input as: `*_deflyt.pdf`.
 
 
 ### Advanced Options
@@ -206,21 +206,21 @@ By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).
 **Super Basic**
 ```bash
 # Compress using the default preset ("standard").
-# Output will be written as input_squeezed.pdf next to the input,
+# Output will be written as input_deflyt.pdf next to the input,
 # but only if the compressed file is meaningfully smaller.
-pdf-squeeze input.pdf
+pdf-deflyt input.pdf
 ```
 
 **Basic Explicit Output**
 ```bash
 # Compress using the "standard" preset and write to a specific path:
-pdf-squeeze -p standard input.pdf -o output.pdf
+pdf-deflyt -p standard input.pdf -o output.pdf
 ```
 
 **Estimate Only (Dry Run)**
 ```bash
 # Show estimated size and savings without modifying the file:
-pdf-squeeze --dry-run -p light input.pdf
+pdf-deflyt --dry-run -p light input.pdf
 # Output:
 # DRY: input.pdf  est_savings≈42%  est_size≈1.2MB (from 2.1MB)
 ```
@@ -229,7 +229,7 @@ pdf-squeeze --dry-run -p light input.pdf
 ```bash
 # Overwrite the original file in-place, but only keep the result if
 # the compressed version is at least 25% smaller.
-pdf-squeeze -p extreme --inplace --min-gain 25 input.pdf
+pdf-deflyt -p extreme --inplace --min-gain 25 input.pdf
 ```
 
 **Batch a Folder (Recursive, Parallel)**
@@ -237,7 +237,7 @@ pdf-squeeze -p extreme --inplace --min-gain 25 input.pdf
 # Recurse into ~/Documents/PDFs, compress all PDFs using the standard preset,
 # include only those under "/Reports/", skip any in "/Drafts/",
 # and process up to 4 files in parallel.
-pdf-squeeze -p standard --recurse \
+pdf-deflyt -p standard --recurse \
   --include '/Reports/' --exclude '/Drafts/' \
   --jobs 4 ~/Documents/PDFs
 ```
@@ -245,32 +245,32 @@ pdf-squeeze -p standard --recurse \
 **Skip Tiny Files (<5 MB)**
 ```bash
 # Skip any PDFs smaller than 5 MB entirely:
-pdf-squeeze --skip-if-smaller 5MB my.pdf -o my_small.pdf
+pdf-deflyt --skip-if-smaller 5MB my.pdf -o my_small.pdf
 ```
 
 **Encrypted PDFs**
 ```bash
 # Without a password, encrypted PDFs are skipped safely:
-pdf-squeeze input_encrypted.pdf -o out.pdf
+pdf-deflyt input_encrypted.pdf -o out.pdf
 
 # Provide a password to actually compress encrypted PDFs:
-pdf-squeeze --password mysecretpassword input_encrypted.pdf -o out.pdf
+pdf-deflyt --password mysecretpassword input_encrypted.pdf -o out.pdf
 
 # Better than passing --password directly on the CLI:
-pdf-squeeze --password-file ~/secrets/pdfpass.txt input_encrypted.pdf
+pdf-deflyt --password-file ~/secrets/pdfpass.txt input_encrypted.pdf
 ```
 
 **Dry-Run Entire Tree (Planning View)**
 ```bash
 # Show estimated savings for all PDFs in a directory tree,
 # without writing any files:
-pdf-squeeze --dry-run --recurse ~/Scans
+pdf-deflyt --dry-run --recurse ~/Scans
 ```
 
 **Use a Post-Hook (Integration Example)**
 ```bash
 # Run a custom command after processing each file:
-pdf-squeeze --inplace --post-hook 'echo Processed: {} >> ~/processed.log' ~/Scans/file.pdf
+pdf-deflyt --inplace --post-hook 'echo Processed: {} >> ~/processed.log' ~/Scans/file.pdf
 ```
 
 ---
@@ -281,9 +281,9 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 
 ### How It Works
 
-`pdf-squeeze` automatically:
+`pdf-deflyt` automatically:
 1. Detects FlateDecode-compressed images with ICC profiles
-2. Uses the `pdf-squeeze-image-recompress` helper script
+2. Uses the `pdf-deflyt-image-recompress` helper script
 3. Converts images via ImageMagick (preserves ICC profiles)
 4. Reinserts properly-compressed images into the PDF
 
@@ -293,7 +293,7 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 - **Python 3.7+** (standard on modern macOS/Linux)
 - **PyMuPDF** (auto-installed in isolated venv on first use)
 
-The helper script automatically creates a local Python virtual environment (`.pdf-squeeze-venv`) and installs PyMuPDF on first run. No manual Python setup required.
+The helper script automatically creates a local Python virtual environment (`.pdf-deflyt-venv`) and installs PyMuPDF on first run. No manual Python setup required.
 
 ### What Happens Without ImageMagick?
 
@@ -311,21 +311,21 @@ If ImageMagick is not installed:
 ### Example
 ```bash
 # PDF with ICC profiles - automatically handled
-pdf-squeeze photo-portfolio.pdf
+pdf-deflyt photo-portfolio.pdf
 # NOTICE: Detected ICC profile images, using ImageMagick-based compression
-# → photo-portfolio_squeezed.pdf  (89.4% smaller)  [ok]
+# → photo-portfolio_deflyt.pdf  (89.4% smaller)  [ok]
 
 # Verify helper is working
-pdf-squeeze-image-recompress --help
+pdf-deflyt-image-recompress --help
 
 # Debug mode shows detection
-pdf-squeeze --debug icc-document.pdf
+pdf-deflyt --debug icc-document.pdf
 ```
 ---
 
 ## Compression Logic (what happens under the hood)
 
-`pdf-squeeze` aims for “smaller, still-good” — not just the smallest possible bytes. The pipeline is content-aware and tuned to keep text selectable, preserve vector graphics when possible, and compress raster images aggressively only when it’s safe.
+`pdf-deflyt` aims for “smaller, still-good” — not just the smallest possible bytes. The pipeline is content-aware and tuned to keep text selectable, preserve vector graphics when possible, and compress raster images aggressively only when it’s safe.
 
 ### High-level flow
 1. **Probe & classify pages**  
@@ -413,12 +413,12 @@ pdf-squeeze --debug icc-document.pdf
 There are two AppleScripts provided:
 
 1. **Compress PDF Now** — a menu/toolbar action to compress the selected PDFs immediately.
-2. **PDF Squeeze (Smart Rule)** — a handler for DEVONthink Smart Rules to compress PDFs automatically when they meet certain conditions (e.g. added to a group, file size > X).
+2. **PDF Deflyt (Smart Rule)** — a handler for DEVONthink Smart Rules to compress PDFs automatically when they meet certain conditions (e.g. added to a group, file size > X).
 
 
-By default, both scripts use **pdf-squeeze** with the **standard** compression preset, but this can be changed by editing the AppleScript headers if you prefer a different preset.
+By default, both scripts use **pdf-deflyt** with the **standard** compression preset, but this can be changed by editing the AppleScript headers if you prefer a different preset.
 
-Let DEVONthink complete OCR **before** compression (pdf-squeeze does **not** perform OCR).
+Let DEVONthink complete OCR **before** compression (pdf-deflyt does **not** perform OCR).
 
 Smart Rules can safely run `--inplace mode`; timestamps are preserved unless overridden with --no-keep-date.
 
@@ -427,7 +427,7 @@ Smart Rules can safely run `--inplace mode`; timestamps are preserved unless ove
 Use the installer to place the compiled scripts into the correct **DEVONthink 4**/**3** folders. By default, it auto-detects what you have installed:
 
 ```bash 
-(curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-squeeze/main/install-pdf-squeeze.sh \)
+(curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/install-pdf-deflyt.sh \)
  | bash -s -- --with-devonthink
 ```
 >Tip: Re-running the installer will **update** the scripts to the latest version automatically.
@@ -442,11 +442,11 @@ Use the `--prefix` option if you need to override defaults.
 **Compress PDF Now**
 - Select a PDF then run the script from the **Scripts** menu.
 
-**PDF Squeeze (Smart Rule)**
+**PDF Deflyt (Smart Rule)**
 - Create a **Smart Rule** (_Tools → New Smart Rule…_)
 - Choose your conditions (e.g. Kind is PDF, Size > 300 KB, etc.).
 - Under **Perform the following actions**, select **Apply Script…** and choose
-**PDF Squeeze (Smart Rule)**.
+**PDF Deflyt (Smart Rule)**.
 - For unattended operation, use `--inplace --min-gain 1` for safety, or customise flags in the AppleScript source.
 
 **Recommended Defaults**
@@ -508,8 +508,8 @@ Use the `--prefix` option if you need to override defaults.
   ```
   Verify helper exists:
   ```bash
-  ls -l $(dirname $(which pdf-squeeze))/pdf-squeeze-image-recompress
-  pdf-squeeze-image-recompress --help
+  ls -l $(dirname $(which pdf-deflyt))/pdf-deflyt-image-recompress
+  pdf-deflyt-image-recompress --help
   ```
   The Python virtual environment is created automatically on first use.
 
@@ -527,12 +527,12 @@ Use the `--prefix` option if you need to override defaults.
 
 # Development
 
-This is only relevant to those who want to reuse or extend pdf-squeeze.
+This is only relevant to those who want to reuse or extend pdf-deflyt.
 
 ## Build and Install
 
 ```bash
-make install-bin          # installs ./pdf-squeeze to ~/bin/pdf-squeeze (default)
+make install-bin          # installs ./pdf-deflyt to ~/bin/pdf-deflyt (default)
 ```
 Ensure `~/bin` is on your `PATH`. Override the target with:
 ```bash
@@ -565,8 +565,8 @@ Or manually move the compiled `.scpt` files into DEVONthink 3's scripts location
 
 ## Repository Layout
 
-- `pdf-squeeze` — the zsh CLI
-- `pdf-squeeze-image-recompress` — Python helper for ICC profile images
+- `pdf-deflyt` — the zsh CLI
+- `pdf-deflyt-image-recompress` — Python helper for ICC profile images
 - `tests/` — fixtures, helpers, and the full test suite
 - `scripts/` — `lint.sh`, `format.sh`
 - `devonthink-scripts/` — optional AppleScripts and compiled `.scpt`
@@ -613,7 +613,7 @@ make lint FIX=1     # report only
 ## Make Targets
 
 ```text
-install-bin   # copy ./pdf-squeeze → ~/bin/pdf-squeeze (override PREFIX=...)
+install-bin   # copy ./pdf-deflyt → ~/bin/pdf-deflyt (override PREFIX=...)
 compile       # build AppleScripts → devonthink-scripts/compiled
 install-dt    # install compiled scripts into DEVONthink App Scripts folder
 install       # = install-bin + install-dt

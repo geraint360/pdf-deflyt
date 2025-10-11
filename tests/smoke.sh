@@ -22,17 +22,17 @@ need_any() {
 # Requirements
 need_any gs ghostscript # brew installs `gs`
 need pdfcpu
-[ -x "$ROOT/pdf-squeeze" ] || {
-  echo "pdf-squeeze not found/executable at $ROOT/pdf-squeeze"
+[ -x "$ROOT/pdf-deflyt" ] || {
+  echo "pdf-deflyt not found/executable at $ROOT/pdf-deflyt"
   exit 1
 }
 
 # Version/Help should not error
-"$ROOT/pdf-squeeze" --version > /dev/null || {
+"$ROOT/pdf-deflyt" --version > /dev/null || {
   echo "version failed"
   exit 2
 }
-"$ROOT/pdf-squeeze" --help > /dev/null 2>&1 || true
+"$ROOT/pdf-deflyt" --help > /dev/null 2>&1 || true
 
 # Make a tiny 1-page PDF with Ghostscript
 tmp="$ROOT/tests/assets-smoke"
@@ -43,8 +43,8 @@ gs -q -dBATCH -dNOPAUSE -sDEVICE=pdfwrite \
   -c "<</PageSize [612 792]>> setpagedevice /Helvetica findfont 14 scalefont setfont 72 720 moveto (hello) show showpage" > /dev/null
 
 # Run a dry-run and validate it at least prints a DRY line.
-# Capture stderr because pdf-squeeze writes the summary there.
-out="$("$ROOT/pdf-squeeze" --dry-run -p light "$tmp/one.pdf" 2>&1 || true)"
+# Capture stderr because pdf-deflyt writes the summary there.
+out="$("$ROOT/pdf-deflyt" --dry-run -p light "$tmp/one.pdf" 2>&1 || true)"
 
 # Be tolerant: only require a line that starts with "DRY:" (ignore the rest).
 # Also fail fast if it looks like it skipped the file as unreadable.

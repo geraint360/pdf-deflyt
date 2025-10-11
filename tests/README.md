@@ -1,12 +1,12 @@
-# pdf-squeeze – Test Suite
+# pdf-deflyt – Test Suite
 
-This directory contains a self-validating test harness for `pdf-squeeze`.  
+This directory contains a self-validating test harness for `pdf-deflyt`.  
 It builds deterministic fixtures, runs parallelized checks across all presets, and verifies key flags and behaviors.
 
 ## What’s covered
 
 - Presets: `light`, `standard`, `extreme`, `lossless`, `archive`
-- Output handling: `-o` (explicit output), default naming (`_squeezed`), paths with spaces
+- Output handling: `-o` (explicit output), default naming (`_deflyt`), paths with spaces
 - Estimation: `--dry-run` line appears with size + savings
 - In-place mode: `--inplace` preserves original mtime (within a small tolerance)
 - Filtering: `--include` / `--exclude` (both normal and recursive cases)
@@ -98,10 +98,10 @@ make test-clean            # wipe tests/assets*, tests/build
   Install the dependencies: `brew install ghostscript pdfcpu`.
 
 - **Parallel test says “expected N outputs, got 0”**  
-  Verify `pdf-squeeze` is executable at the repo root (`./pdf-squeeze`) or run `make install-bin` if you use that workflow.
+  Verify `pdf-deflyt` is executable at the repo root (`./pdf-deflyt`) or run `make install-bin` if you use that workflow.
 
 - **Filters test fails**  
-  The suite exercises both default output (`_squeezed.pdf`) and `--inplace` modes; ensure `--include`/`--exclude` patterns are POSIX ERE (like `grep -E`), and that your build hasn’t overridden those flags.
+  The suite exercises both default output (`_deflyt.pdf`) and `--inplace` modes; ensure `--include`/`--exclude` patterns are POSIX ERE (like `grep -E`), and that your build hasn’t overridden those flags.
 
 ## CI (optional)
 
