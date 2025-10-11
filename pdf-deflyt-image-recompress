@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-pdf-squeeze-image-recompress
-Helper script for pdf-squeeze to handle ICC profile images using ImageMagick
+pdf-deflyt-image-recompress
+Helper script for pdf-deflyt to handle ICC profile images using ImageMagick
 
 DEPENDENCIES:
   System: ImageMagick (brew install imagemagick)
   Python: PyMuPDF (auto-installed in local venv on first run)
 
-The script automatically creates a local virtual environment (.pdf-squeeze-venv)
+The script automatically creates a local virtual environment (.pdf-deflyt-venv)
 and installs PyMuPDF on first run. No manual pip installation required.
 
 USAGE:
-  pdf-squeeze-image-recompress [-v] [-q QUALITY] INPUT OUTPUT
+  pdf-deflyt-image-recompress [-v] [-q QUALITY] INPUT OUTPUT
   
-This script is normally called by pdf-squeeze automatically when needed.
+This script is normally called by pdf-deflyt automatically when needed.
 """
 
 import sys
@@ -29,7 +29,7 @@ def check_imagemagick():
 
 # Virtual environment setup for PyMuPDF only
 SCRIPT_DIR = Path(__file__).parent.resolve()
-VENV_DIR = SCRIPT_DIR / ".pdf-squeeze-venv"
+VENV_DIR = SCRIPT_DIR / ".pdf-deflyt-venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python3"
 
 def setup_venv():
