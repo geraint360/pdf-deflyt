@@ -67,6 +67,9 @@ EOF
   exit 2
 }
 
+# export PDF_DEFLYT_HELPER to force an absolute path if desired
+: "${PDF_DEFLYT_HELPER:=}"
+
 typeset -a ARGS FILES EXCLUDES INCLUDES
 PRESET="standard"; OUT_SINGLE=""; JPEGQ_OVERRIDE=""
 RECURSE=false; JOBS=1; INPLACE=false; DRYRUN=false; DEBUG=false
@@ -370,23 +373,28 @@ gs_pass() {
 python_recompress_images() {
   local in="$1" out="$2" jpegq="$3"
 
-  local helper=""
-  local script_dir="$(cd "$(dirname "${(%):-%N}")" && pwd)"
-
-  if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
-    helper="$script_dir/pdf-deflyt-image-recompress"
-  elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
-    helper="./pdf-deflyt-image-recompress"
-  elif command -v pdf-deflyt-image-recompress >/dev/null 2>&1; then
-    helper="pdf-deflyt-image-recompress"
+  # 1) If caller provided an explicit helper path, use it
+  if [[ -n "$PDF_DEFLYT_HELPER" && -x "$PDF_DEFLYT_HELPER" ]]; then
+    helper="$PDF_DEFLYT_HELPER"
   else
-    return 1
+    # 2) Resolve this script’s directory in zsh reliably (works in Shortcuts)
+    local this="${0:A}" 2>/dev/null || this="$0"
+    local script_dir="${this:h}"
+    local helper=""
+    # 3) Search order: alongside script, then CWD, then PATH
+    if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
+      helper="$script_dir/pdf-deflyt-image-recompress"
+    elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
+      helper="./pdf-deflyt-image-recompress"
+    elif helper="$(command -v pdf-deflyt-image-recompress 2>/dev/null)"; then
+      :
+    else
+      return 1
+    fi
   fi
-  
-  # Pass --verbose only if DEBUG is enabled
+
   local verbose_flag=""
-  $DEBUG && verbose_flag="-v"
-  
+  [[ "${DEBUG:-false}" == true ]] && verbose_flag="-v"
   "$helper" $verbose_flag -q "${jpegq:-75}" "$in" "$out" 2>&1
 }
 
