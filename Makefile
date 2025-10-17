@@ -33,7 +33,7 @@ DT_SCRIPTS_DIR := $(HOME)/Library/Application Scripts/$(DT_BUNDLE)
 DT_MENU    := $(DT_SCRIPTS_DIR)/Menu
 DT_RULES   := $(DT_SCRIPTS_DIR)/Smart Rules
 
-.PHONY: compile clean show-paths test test-clean install-bin install-dt uninstall-dt install lint smoke smoke-clean fmt
+.PHONY: compile clean show-paths test test-clean install-bin install-dt uninstall-dt install lint smoke smoke-clean fmt benchmark
 
 .DEFAULT_GOAL := help
 
@@ -46,6 +46,10 @@ help:
 	@echo "  install       install-bin + install-dt"
 	@echo "  test          Run test suite"
 	@echo "  test-clean    Clean test artifacts"
+	@echo "  benchmark     Run performance benchmarks"
+	@echo "  smoke         Run smoke tests (lightweight)"
+	@echo "  lint          Check code style"
+	@echo "  fmt           Format code"
 	@echo "  clean         Remove compiled scripts"
 	@echo "  show-paths    Print important paths"
 
@@ -88,11 +92,11 @@ install-dt: compile
 	@echo "Done: installed to DEVONthink scripts folders."
 
 uninstall-dt:
-	@rm -f "$(DT_MENU_DIR)/Compress PDF Now.scpt" \
-	       "$(DT_SMART_DIR)/PDF Deflyt (Smart Rule).scpt" || true
+	@rm -f "$(DT_MENU)/Compress PDF Now.scpt" \
+	       "$(DT_RULES)/PDF Deflyt (Smart Rule).scpt" || true
 	@echo "Removed DT scripts from:"
-	@echo "  • $(DT_MENU_DIR)"
-	@echo "  • $(DT_SMART_DIR)"
+	@echo "  • $(DT_MENU)"
+	@echo "  • $(DT_RULES)"
 
 # Install pdf-deflyt into ~/bin (create if missing)
 install-bin:
@@ -134,4 +138,8 @@ lint:
 
 fmt:
 	@scripts/format.sh
-	
+
+# Run performance benchmarks
+benchmark:
+	@echo "🚀 Running performance benchmarks..."
+	@tests/benchmark.sh

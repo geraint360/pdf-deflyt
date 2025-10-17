@@ -4,7 +4,7 @@ set -o pipefail
 
 # pdf-deflyt v2.3.0-zsh
 # - Auto-tuned compression via image PPI analysis
-# - Presets: light / standard / extreme / aggressive / lossless / archive
+# - Presets: light, standard, extreme, lossless, archive
 # - Batch + recurse + parallel processing
 # - Special handling for ICC profile images via ImageMagick
 # - Metadata & timestamps preserved by default
@@ -18,8 +18,6 @@ set -o pipefail
 #   - Helper script pdf-deflyt-image-recompress must be in same directory
 #   - Python dependencies are auto-managed by the helper (no manual setup)
 
-version="2.3.0-zsh"
-
 usage() {
   cat <<'EOF'
 Usage:
@@ -29,7 +27,6 @@ Presets:
   -p standard   (default) Auto-tuned per-PDF targets
   -p light      C/G 300dpi; mono 1200dpi; JPEG Q~78
   -p extreme    C/G 144dpi; mono 600dpi; JPEG Q~68
-  -p aggressive No downsampling; JPEG recompression; strips metadata
   -p lossless   Structure-only; no image recompression
   -p archive    C/G 240dpi; mono 900dpi; deterministic; strips metadata
 
@@ -67,17 +64,68 @@ EOF
   exit 2
 }
 
-# export PDF_DEFLYT_HELPER to force an absolute path if desired
+# ============================================================================
+# Configuration Constants (immutable)
+# ============================================================================
+readonly VERSION="2.3.0-zsh"
+readonly IMAGEMAGICK_TIMEOUT=30  # seconds for ImageMagick operations
+readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
+readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
+
+# Dependency lists
+readonly -a REQUIRED_DEPS=(gs pdfcpu qpdf mutool exiftool pdfinfo pdfimages sha256sum gstat)
+readonly -a REQUIRED_PKGS=('ghostscript' 'pdfcpu' 'qpdf' 'mupdf' 'exiftool' 'poppler' 'poppler' 'coreutils' 'coreutils')
+readonly -a OPTIONAL_DEPS=(parallel magick)
+readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick')
+
+# Helper script path (can be overridden via environment: export PDF_DEFLYT_HELPER=/path/to/helper)
 : "${PDF_DEFLYT_HELPER:=}"
 
+# ============================================================================
+# Runtime Configuration (set by command-line arguments)
+# ============================================================================
+
+# File lists and filters
 typeset -a ARGS FILES EXCLUDES INCLUDES
-PRESET="standard"; OUT_SINGLE=""; JPEGQ_OVERRIDE=""
-RECURSE=false; JOBS=1; INPLACE=false; DRYRUN=false; DEBUG=false
-LOGFILE=""; MIN_GAIN=1; SKIP_UNDER_BYTES=""
-KEEP_METADATA=true; KEEP_DATE=true; DETERMINISTIC=true
-PASSWORD=""; PASSWORD_FILE=""; POST_HOOK=""; SIDECAR=false
-QUIET=${QUIET:-false}; INTERNAL_ONE=false
+
+# Compression settings
+PRESET="standard"
+JPEGQ_OVERRIDE=""
+
+# Output options
+OUT_SINGLE=""
+INPLACE=false
+
+# Processing mode
+RECURSE=false
+JOBS=1
+DRYRUN=false
+DEBUG=false
 CHECK_DEPS=false
+
+# Logging
+LOGFILE=""
+QUIET=${QUIET:-false}
+
+# File filtering
+MIN_GAIN=1
+SKIP_UNDER_BYTES=""
+
+# Metadata and timestamps
+KEEP_METADATA=true
+KEEP_DATE=true
+DETERMINISTIC=true
+
+# Security
+PASSWORD=""
+PASSWORD_FILE=""
+
+# Hooks and sidecars
+POST_HOOK=""
+SIDECAR=false
+
+# Internal flags
+INTERNAL_ONE=false
 
 log() { $QUIET || printf '%s\n' "$@"; }
 
@@ -110,7 +158,7 @@ while [[ $# -gt 0 ]]; do
     --internal-one) INTERNAL_ONE=true; shift ;;
     --check-deps) CHECK_DEPS=true; shift ;;
     --help|-h) usage ;;
-    --version) echo "$version"; exit 0 ;;
+    --version) echo "$VERSION"; exit 0 ;;
     --) shift; break ;;
     -*) echo "Unknown option: $1" >&2; usage ;;
     *) ARGS+=("$1"); shift ;;
@@ -119,18 +167,47 @@ done
 
 [[ ${#ARGS[@]} -ge 1 || $INTERNAL_ONE = true || $CHECK_DEPS = true ]] || usage
 if [[ -n "$OUT_SINGLE" && ${#ARGS[@]} -ne 1 && $INTERNAL_ONE = false ]]; then
-  echo "-o is only valid with a single input file." >&2; exit 2
+  echo "ERROR: -o option requires exactly one input file (got ${#ARGS[@]})" >&2
+  exit 2
 fi
-if [[ -n "$PASSWORD_FILE" && -z "$PASSWORD" ]]; then
+
+# Validate password file
+if [[ -n "$PASSWORD_FILE" ]]; then
+  if [[ ! -f "$PASSWORD_FILE" ]]; then
+    echo "ERROR: Password file not found: $PASSWORD_FILE" >&2
+    exit 2
+  fi
+  if [[ ! -r "$PASSWORD_FILE" ]]; then
+    echo "ERROR: Cannot read password file: $PASSWORD_FILE" >&2
+    exit 2
+  fi
   PASSWORD="$(/usr/bin/head -n1 "$PASSWORD_FILE" 2>/dev/null || true)"
+  if [[ -z "$PASSWORD" ]]; then
+    echo "ERROR: Password file is empty: $PASSWORD_FILE" >&2
+    exit 2
+  fi
+fi
+
+# Validate JPEG quality
+if [[ -n "$JPEGQ_OVERRIDE" ]]; then
+  if ! [[ "$JPEGQ_OVERRIDE" =~ ^[0-9]+$ ]] || (( JPEGQ_OVERRIDE < 1 || JPEGQ_OVERRIDE > 100 )); then
+    echo "ERROR: JPEG quality must be between 1 and 100 (got: $JPEGQ_OVERRIDE)" >&2
+    exit 2
+  fi
+fi
+
+# Validate jobs parameter
+if ! [[ "$JOBS" =~ ^[0-9]+$ ]] || (( JOBS < 1 )); then
+  echo "ERROR: --jobs must be a positive integer (got: $JOBS)" >&2
+  exit 2
 fi
 
 check_deps() {
   local -a REQ_CMDS REQ_DESC OPT_CMDS OPT_DESC
-  REQ_CMDS=(gs pdfcpu qpdf mutool exiftool pdfinfo pdfimages sha256sum gstat)
-  REQ_DESC=('ghostscript' 'pdfcpu' 'qpdf' 'mupdf' 'exiftool' 'poppler' 'poppler' 'coreutils' 'coreutils')
-  OPT_CMDS=(parallel magick)
-  OPT_DESC=('parallel' 'imagemagick')
+  REQ_CMDS=("${REQUIRED_DEPS[@]}")
+  REQ_DESC=("${REQUIRED_PKGS[@]}")
+  OPT_CMDS=("${OPTIONAL_DEPS[@]}")
+  OPT_DESC=("${OPTIONAL_PKGS[@]}")
 
   local missing=0
 
@@ -167,7 +244,13 @@ check_deps() {
   return $missing
 }
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1"; exit 127; }; }
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "ERROR: Missing required dependency: $1" >&2
+    echo "Install with: brew install ghostscript pdfcpu qpdf mupdf exiftool poppler coreutils" >&2
+    exit 127
+  }
+}
 if $CHECK_DEPS; then check_deps; exit $?; fi
 
 for t in pdfcpu qpdf mutool exiftool pdfinfo pdfimages gs sha256sum; do need "$t"; done
@@ -196,7 +279,7 @@ else
     done < <(gather_one "$x")
   done
 fi
-[[ ${#FILES[@]} -ge 1 ]] || { echo "No PDFs found."; exit 1; }
+[[ ${#FILES[@]} -ge 1 ]] || { echo "ERROR: No PDF files found in the specified location(s)" >&2; exit 1; }
 
 if $DEBUG; then
   printf 'DEBUG: FILES(%d):\n' "${#FILES[@]}"
@@ -221,10 +304,29 @@ filter_files() {
 }
 if ! $INTERNAL_ONE; then
   FILES=("${(f)$(filter_files "${FILES[@]}")}")
-  [[ ${#FILES[@]} -ge 1 ]] || { echo "No PDFs after filtering."; exit 1; }
+  [[ ${#FILES[@]} -ge 1 ]] || { echo "ERROR: No PDF files remaining after applying filters" >&2; exit 1; }
 fi
 
-size_of() { { command gstat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null; } }
+# Cross-platform stat helpers
+size_of() {
+  { command gstat -c%s "$1" 2>/dev/null || \
+    stat -f%z "$1" 2>/dev/null || \
+    stat -c%s "$1" 2>/dev/null; }
+}
+
+stat_time() {
+  local file="$1" type="$2"  # type: atime or mtime
+  case "$type" in
+    atime) { command gstat -c %X "$file" 2>/dev/null || \
+             stat -f %a "$file" 2>/dev/null || \
+             stat -c %X "$file" 2>/dev/null; } ;;
+    mtime) { command gstat -c %Y "$file" 2>/dev/null || \
+             stat -f %m "$file" 2>/dev/null || \
+             stat -c %Y "$file" 2>/dev/null; } ;;
+    *) echo "0" ;;
+  esac
+}
+
 restore_times() { touch -r "$1" "$2" 2>/dev/null || true; }
 
 unique_filename() {
@@ -252,7 +354,7 @@ parse_bytes() {
       G|GB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024*1024}' ;;
     esac; return
   fi
-  echo "Invalid SIZE: $1" >&2; exit 2
+  echo "ERROR: Invalid SIZE format: '$1'. Expected format: 200K, 1.5MB, 2GB" >&2; exit 2
 }
 
 fmt_bytes() {
@@ -330,7 +432,14 @@ analyse_pdf() {
   [[ -n "$parsed" ]] && echo "$parsed" || echo "0 0 0 0 0 0 0 0 0"
 }
 
-sha_sidecar() { local which="$1" file="$2"; sha256sum "$file" > "${file}.${which}.sha256" 2>/dev/null || true; }
+sha_sidecar() {
+  local which="$1" file="$2"
+  if ! sha256sum "$file" > "${file}.${which}.sha256" 2>/dev/null; then
+    log "WARNING: Failed to create $which SHA256 sidecar for: ${file##*/}"
+    return 1
+  fi
+  return 0
+}
 
 gs_pass() {
   local in="$1" out="$2" jpegq="$3" deterministic="$4" C_RES="$5" G_RES="$6" M_RES="$7"
@@ -474,24 +583,27 @@ process_one() {
   # Handle encryption
   local encrypted="no"
   if [[ -n "$PASS" ]]; then
-    local dec="$(dirname "$IN")/.tmp.$(basename "$IN").dec.$$"
+    local dec="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dec.XXXXXXXX")"
+    chmod 600 "$dec"  # Restrict permissions immediately
     if qpdf --password="$PASS" --decrypt "$IN" "$dec" >/dev/null 2>&1; then
       IN="$dec"
+      trap "rm -f '$dec' 2>/dev/null || true" EXIT
     else
-      log "SKIP (bad password): $orig"
+      rm -f "$dec" 2>/dev/null || true
+      log "SKIP: $orig (incorrect password)"
       return 0
     fi
   else
     if pdfinfo "$IN" 2>/dev/null | command egrep -qi '^Encrypted:\s*yes'; then
-      log "SKIP (encrypted): $IN"
+      log "SKIP: $IN (encrypted - use --password or --password-file to process)"
       return 0
     fi
   fi
 
   local atime mtime
   if $KEEP_DT; then
-    atime=$(command gstat -c %X "$orig" 2>/dev/null || stat -f %a "$orig" 2>/dev/null || true)
-    mtime=$(command gstat -c %Y "$orig" 2>/dev/null || stat -f %m "$orig" 2>/dev/null || true)
+    atime=$(stat_time "$orig" atime)
+    mtime=$(stat_time "$orig" mtime)
   fi
 
   if [[ ! -r "$IN" ]]; then
@@ -500,10 +612,11 @@ process_one() {
   fi
 
   local dir="$(dirname "$IN")"
-  local tmp1="$dir/.tmp.$(basename "$IN").opt.$$"
-  local tmp2="$dir/.tmp.$(basename "$IN").gs.$$"
-  local tmp3="$dir/.tmp.$(basename "$IN").fin.$$"
-  
+  local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.opt.XXXXXXXX")"
+  local tmp2="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.gs.XXXXXXXX")"
+  local tmp3="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.fin.XXXXXXXX")"
+  chmod 600 "$tmp1" "$tmp2" "$tmp3"
+
   setopt localtraps
   cleanup() { rm -f "$tmp1" "$tmp2" "$tmp3" 2>/dev/null || true; }
   trap 'cleanup' EXIT
@@ -558,33 +671,59 @@ process_one() {
     return 0
   fi
 
-  # Detect FlateDecode ICC images
-  local HAS_FLATE_ICC=false
-  if pdfimages -list "$tmp1" 2>/dev/null | grep "image  no" | grep -q "icc"; then
-    if mutool show "$tmp1" 8 0 2>/dev/null | grep -q "/Filter /FlateDecode"; then
-      HAS_FLATE_ICC=true
+  # Detect ICC profile images (more robust detection)
+  # ICC images often have encoding that Ghostscript can corrupt, so we use ImageMagick instead
+  local HAS_ICC=false
+  local icc_check
+  if icc_check="$(pdfimages -list "$tmp1" 2>/dev/null)"; then
+    # Check if any image has ICC color profile (look for 'icc' in the color column)
+    # Parse header to find color column, then check data rows
+    if print -r -- "$icc_check" | awk '
+      BEGIN { color_col=0; found=0 }
+      /^page[[:space:]]+num[[:space:]]+type/ {
+        for (i=1; i<=NF; i++) {
+          if ($i == "color") { color_col=i; break }
+        }
+        next
+      }
+      /^-+/ { next }
+      {
+        if (color_col > 0 && NF >= color_col) {
+          if (tolower($color_col) == "icc") {
+            found=1
+            exit
+          }
+        }
+      }
+      END { exit (found ? 0 : 1) }
+    '; then
+      HAS_ICC=true
     fi
   fi
 
   # Image compression
   if [[ "$PRE" == "lossless" || "$NO_IMAGES" == true ]]; then
     cp "$tmp1" "$tmp2"
-  elif $HAS_FLATE_ICC; then
+  elif $HAS_ICC; then
     log "NOTICE: Detected ICC profile images, using ImageMagick-based compression"
     if ! python_recompress_images "$tmp1" "$tmp2" "$JPEGQ"; then
-      log "WARNING: ImageMagick helper unavailable, using structural compression only"
-      log "         For optimal compression: brew install imagemagick"
+      log "WARNING: ImageMagick not found - using structural compression only (1-5% typical savings)"
+      log "         Install ImageMagick for better compression: brew install imagemagick"
       cp "$tmp1" "$tmp2"
     fi
   elif [[ "$PRE" == "aggressive" ]]; then
-    gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" || true
+    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES"; then
+      log "WARNING: Ghostscript compression failed, using structural compression only"
+    fi
     [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
   elif (( (C_CNT > 0 && ${C_MIN%.*} > 0 && ${C_MIN%.*} < C_RES) || \
           (G_CNT > 0 && ${G_MIN%.*} > 0 && ${G_MIN%.*} < G_RES) )); then
     log "NOTICE: Images below target resolution, using structural compression only"
     cp "$tmp1" "$tmp2"
   else
-    gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" || true
+    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES"; then
+      log "WARNING: Ghostscript compression failed, using structural compression only"
+    fi
     [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
   fi
 
@@ -592,9 +731,19 @@ process_one() {
   if ! pdfcpu optimize -quiet "$tmp2" "$tmp3" >/dev/null 2>&1; then
     [[ -s "$tmp2" ]] && cp "$tmp2" "$tmp3" || cp "$tmp1" "$tmp3"
   fi
-  qpdf --linearize "$tmp3" "${tmp3}.w" >/dev/null 2>&1 && mv "${tmp3}.w" "$tmp3" || true
-  mutool clean -z "$tmp3" "${tmp3}.c" >/dev/null 2>&1 && mv "${tmp3}.c" "$tmp3" || true
-  ! $KEEP_META_EFF && exiftool -overwrite_original -all= "$tmp3" >/dev/null 2>&1 || true
+  if ! qpdf --linearize "$tmp3" "${tmp3}.w" >/dev/null 2>&1 || ! mv "${tmp3}.w" "$tmp3" 2>/dev/null; then
+    $DEBUG && log "WARNING: QPDF linearization failed, continuing without linearization"
+    rm -f "${tmp3}.w" 2>/dev/null || true
+  fi
+  if ! mutool clean -z "$tmp3" "${tmp3}.c" >/dev/null 2>&1 || ! mv "${tmp3}.c" "$tmp3" 2>/dev/null; then
+    $DEBUG && log "WARNING: MuPDF clean failed, continuing without additional cleaning"
+    rm -f "${tmp3}.c" 2>/dev/null || true
+  fi
+  if ! $KEEP_META_EFF; then
+    if ! exiftool -overwrite_original -all= "$tmp3" >/dev/null 2>&1; then
+      $DEBUG && log "WARNING: Metadata removal failed, continuing with metadata intact"
+    fi
+  fi
 
   local OUT_BYTES=$(size_of "$tmp3")
   local SAVEPCT=$(awk -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{printf "%.2f",(b>0)?(100*(1-a/b)):0}')
@@ -615,12 +764,17 @@ process_one() {
     ! $INPLACE && cp "$orig" "$OUT"
   fi
 
-  $SIDECAR && { sha_sidecar pre "$orig" || true; sha_sidecar post "$OUT" || true; }
-  
+  if $SIDECAR; then
+    sha_sidecar pre "$orig" || log "WARNING: Failed to create pre-compression SHA256 sidecar"
+    sha_sidecar post "$OUT" || log "WARNING: Failed to create post-compression SHA256 sidecar"
+  fi
+
   if [[ -n "$POST_HOOK" ]]; then
     cmd=${POST_HOOK//\{\}/${(q)OUT}}
-    env IN="$orig" OUT="$OUT" ORIG_BYTES="$ORIG_BYTES" OUT_BYTES="$OUT_BYTES" \
-        PRESET="$PRE" SAVEPCT="$SAVEPCT" /bin/zsh -lc -- "$cmd" || true
+    if ! env IN="$orig" OUT="$OUT" ORIG_BYTES="$ORIG_BYTES" OUT_BYTES="$OUT_BYTES" \
+             PRESET="$PRE" SAVEPCT="$SAVEPCT" /bin/zsh -lc -- "$cmd"; then
+      log "WARNING: Post-hook command failed: $cmd"
+    fi
   fi
   
   if [[ -n "$LOGFILE" ]]; then
@@ -701,6 +855,10 @@ if [[ -n "$OUT_SINGLE" ]]; then
 fi
 
 if (( JOBS > 1 )) && $PARALLEL_OK; then
+  # Progress indicator for parallel mode
+  local total="${#FILES[@]}"
+  $QUIET || (( total > 1 )) && log "Processing $total files in parallel (${JOBS} workers)..."
+
   env PRESET="$PRESET" JPEGQ_OVERRIDE="$JPEGQ_OVERRIDE" INPLACE="$INPLACE" \
       KEEP_METADATA="$KEEP_METADATA" KEEP_DATE="$KEEP_DATE" MIN_GAIN="$MIN_GAIN" \
       DETERMINISTIC="$DETERMINISTIC" PASSWORD="$PASSWORD" POST_HOOK="$POST_HOOK" \
@@ -710,5 +868,16 @@ if (( JOBS > 1 )) && $PARALLEL_OK; then
   command parallel -j "$JOBS" --no-notice --will-cite -- \
     "$0" --internal-one {} ::: "${FILES[@]}"
 else
-  for f in "${FILES[@]}"; do run_wrapper "$f" ""; done
+  # Progress indicator for sequential mode
+  local total="${#FILES[@]}"
+  local current=0
+
+  for f in "${FILES[@]}"; do
+    ((current++))
+    if ! $QUIET && (( total > 1 )); then
+      local basename="${f##*/}"
+      printf 'Processing (%d/%d): %s\n' "$current" "$total" "$basename" >&2
+    fi
+    run_wrapper "$f" ""
+  done
 fi

@@ -1,0 +1,38 @@
+{
+  "name": "pdf-deflyt",
+  "version": "2.3.0",
+  "description": "A fast PDF size reducer for macOS and Linux with content-aware compression",
+  "main": "pdf-deflyt",
+  "scripts": {
+    "test": "make test",
+    "lint": "make lint",
+    "smoke": "make smoke"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/geraint360/pdf-deflyt.git"
+  },
+  "keywords": [
+    "pdf",
+    "compression",
+    "optimization",
+    "cli",
+    "macos",
+    "linux",
+    "ghostscript",
+    "batch-processing"
+  ],
+  "author": "Geraint Preston",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/geraint360/pdf-deflyt/issues"
+  },
+  "homepage": "https://github.com/geraint360/pdf-deflyt#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ]
+}

@@ -82,7 +82,7 @@ make test-clean            # wipe tests/assets*, tests/build
 
 ## Environment variables
 
-- `PDF_SQUEEZE_TEST_JOBS=<N>` – concurrency for the built-in runner (default: 4 if GNU parallel isn’t available).
+- `PDF_DEFLYT_TEST_JOBS=<N>` – concurrency for the built-in runner (default: 4 if GNU parallel isn't available).
 - `VERBOSE=1` – more output from `lint`.
 - `FIX=1` – auto-apply formatting in `lint`.
 

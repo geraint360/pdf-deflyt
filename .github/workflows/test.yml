@@ -1,8 +1,11 @@
 name: Tests
 
 on:
-  workflow_dispatch: {}   # manual only
-  # (remove push:, pull_request:, schedule:, etc.)
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}   # manual trigger also available
 
 jobs:
   macos:
@@ -42,7 +45,7 @@ jobs:
 
       - name: Run tests
         env:
-          PDF_SQUEEZE_TEST_JOBS: "4"
+          PDF_DEFLYT_TEST_JOBS: "4"
         run: make test
 
       - name: Upload logs on failure
@@ -91,7 +94,7 @@ jobs:
 
       - name: Run tests
         env:
-          PDF_SQUEEZE_TEST_JOBS: "4"
+          PDF_DEFLYT_TEST_JOBS: "4"
         run: make test
 
       - name: Upload logs on failure

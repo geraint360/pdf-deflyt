@@ -1,5 +1,23 @@
 devonthink-scripts/compiled/
 .DS_Store
 
+# Test artifacts
+tests/build/
+tests/assets/
+tests/assets-smoke/
+
+# Python virtual environment
+.pdf-deflyt-venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.tmp.*
+
 # Claude Code configuration (local only)
 CLAUDE.md
