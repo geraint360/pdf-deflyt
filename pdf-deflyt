@@ -34,13 +34,22 @@ Key Options:
   --recurse                 Recurse for *.pdf
   --jobs N                  Parallel workers (requires GNU parallel)
   --inplace                 Replace originals atomically
+  --backup                  Create .bak files with --inplace
   -o OUT                    Single output path (single input only)
   -q N                      Force JPEG quality 1..100
   --min-gain PCT            Skip if savings < PCT (default 1)
   --skip-if-smaller SIZE    Skip files below SIZE (e.g. 200K, 1.5MB)
+  --memory-limit SIZE       Max memory for Ghostscript (e.g. 512M, 2G)
   --dry-run                 Analyze only; show estimated savings
-  --debug                   Show parameters and verbose output
+  --validate                Validate PDFs after compression
+  --resume STATE            Resume interrupted batch job
   --check-deps              Verify dependencies
+
+Output Control:
+  --quiet                   Minimal output
+  --verbose                 Detailed output
+  --debug                   Debug output (implies --verbose)
+  --color auto|always|never Control colored output (default: auto)
 
 Metadata/Timestamps:
   --keep-metadata (default) | --strip-metadata
@@ -81,6 +90,11 @@ readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick')
 # Helper script path (can be overridden via environment: export PDF_DEFLYT_HELPER=/path/to/helper)
 : "${PDF_DEFLYT_HELPER:=}"
 
+# Caching directory for performance optimizations
+readonly CACHE_DIR="${TMPDIR:-/tmp}/pdf-deflyt-cache-${USER:-$(id -u)}"
+readonly DEPS_CACHE="$CACHE_DIR/deps.cache"
+readonly CACHE_TTL=86400  # 24 hours in seconds
+
 # ============================================================================
 # Runtime Configuration (set by command-line arguments)
 # ============================================================================
@@ -95,6 +109,9 @@ JPEGQ_OVERRIDE=""
 # Output options
 OUT_SINGLE=""
 INPLACE=false
+BACKUP=false
+VALIDATE=false
+RESUME_STATE=""
 
 # Processing mode
 RECURSE=false
@@ -106,10 +123,15 @@ CHECK_DEPS=false
 # Logging
 LOGFILE=""
 QUIET=${QUIET:-false}
+VERBOSE=0  # 0=normal, 1=verbose, 2=debug (backward compat: DEBUG=true sets to 2)
+USE_COLOR=auto  # auto, always, never
 
 # File filtering
 MIN_GAIN=1
 SKIP_UNDER_BYTES=""
+
+# Resource management
+MEMORY_LIMIT=""
 
 # Metadata and timestamps
 KEEP_METADATA=true
@@ -127,6 +149,11 @@ SIDECAR=false
 # Internal flags
 INTERNAL_ONE=false
 
+# Batch statistics
+typeset -i STATS_TOTAL=0 STATS_PROCESSED=0 STATS_SKIPPED=0 STATS_FAILED=0
+typeset -i STATS_BYTES_IN=0 STATS_BYTES_OUT=0
+STATS_START_TIME=0
+
 log() { $QUIET || printf '%s\n' "$@"; }
 
 while [[ $# -gt 0 ]]; do
@@ -137,11 +164,17 @@ while [[ $# -gt 0 ]]; do
     --recurse) RECURSE=true; shift ;;
     --jobs) JOBS="${2:-1}"; shift 2 ;;
     --inplace) INPLACE=true; shift ;;
+    --backup) BACKUP=true; shift ;;
+    --validate) VALIDATE=true; shift ;;
+    --resume) RESUME_STATE="${2:-}"; shift 2 ;;
     --dry-run) DRYRUN=true; shift ;;
-    --debug) DEBUG=true; shift ;;
+    --debug) DEBUG=true; VERBOSE=2; shift ;;
+    --verbose) VERBOSE=1; shift ;;
+    --color) USE_COLOR="${2:-auto}"; shift 2 ;;
     --log) LOGFILE="${2:-}"; shift 2 ;;
     --min-gain) MIN_GAIN="${2:-1}"; shift 2 ;;
     --skip-if-smaller) SKIP_UNDER_BYTES="${2:-}"; shift 2 ;;
+    --memory-limit) MEMORY_LIMIT="${2:-}"; shift 2 ;;
     --keep-metadata) KEEP_METADATA=true; shift ;;
     --strip-metadata) KEEP_METADATA=false; shift ;;
     --keep-date) KEEP_DATE=true; shift ;;
@@ -165,25 +198,62 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ ${#ARGS[@]} -ge 1 || $INTERNAL_ONE = true || $CHECK_DEPS = true ]] || usage
+[[ ${#ARGS[@]} -ge 1 || $INTERNAL_ONE = true || $CHECK_DEPS = true || -n "$RESUME_STATE" ]] || usage
 if [[ -n "$OUT_SINGLE" && ${#ARGS[@]} -ne 1 && $INTERNAL_ONE = false ]]; then
   echo "ERROR: -o option requires exactly one input file (got ${#ARGS[@]})" >&2
   exit 2
 fi
 
+# Validate color option
+case "$USE_COLOR" in
+  auto|always|never) ;;
+  *) echo "ERROR: --color must be 'auto', 'always', or 'never' (got: $USE_COLOR)" >&2; exit 2 ;;
+esac
+
+# Detect TTY and set up colors
+ENABLE_COLOR=false
+if [[ "$USE_COLOR" == "always" ]] || { [[ "$USE_COLOR" == "auto" ]] && [[ -t 1 ]]; }; then
+  ENABLE_COLOR=true
+fi
+
+# Color codes (using tput for portability)
+if $ENABLE_COLOR && command -v tput >/dev/null 2>&1; then
+  C_RED=$(tput setaf 1 2>/dev/null || echo '')
+  C_GREEN=$(tput setaf 2 2>/dev/null || echo '')
+  C_YELLOW=$(tput setaf 3 2>/dev/null || echo '')
+  C_BLUE=$(tput setaf 4 2>/dev/null || echo '')
+  C_MAGENTA=$(tput setaf 5 2>/dev/null || echo '')
+  C_CYAN=$(tput setaf 6 2>/dev/null || echo '')
+  C_BOLD=$(tput bold 2>/dev/null || echo '')
+  C_RESET=$(tput sgr0 2>/dev/null || echo '')
+else
+  C_RED= C_GREEN= C_YELLOW= C_BLUE= C_MAGENTA= C_CYAN= C_BOLD= C_RESET=
+fi
+
+# Enhanced logging functions
+log_error() { echo "${C_RED}ERROR:${C_RESET} $*" >&2; }
+log_warn() { echo "${C_YELLOW}WARNING:${C_RESET} $*" >&2; }
+log_info() { $QUIET || echo "${C_BLUE}INFO:${C_RESET} $*"; }
+log_success() { $QUIET || echo "${C_GREEN}✓${C_RESET} $*"; }
+log_verbose() { (( VERBOSE >= 1 )) && echo "${C_CYAN}VERBOSE:${C_RESET} $*"; }
+log_debug() { (( VERBOSE >= 2 )) && echo "${C_MAGENTA}DEBUG:${C_RESET} $*"; }
+
 # Validate password file
 if [[ -n "$PASSWORD_FILE" ]]; then
   if [[ ! -f "$PASSWORD_FILE" ]]; then
-    echo "ERROR: Password file not found: $PASSWORD_FILE" >&2
+    log_error "Password file not found: $PASSWORD_FILE"
+    log_info "Suggestion: Check the file path or create the password file with the PDF password on the first line"
     exit 2
   fi
   if [[ ! -r "$PASSWORD_FILE" ]]; then
-    echo "ERROR: Cannot read password file: $PASSWORD_FILE" >&2
+    log_error "Cannot read password file: $PASSWORD_FILE"
+    log_info "Suggestion: Check file permissions (should be readable): chmod 600 $PASSWORD_FILE"
     exit 2
   fi
   PASSWORD="$(/usr/bin/head -n1 "$PASSWORD_FILE" 2>/dev/null || true)"
   if [[ -z "$PASSWORD" ]]; then
-    echo "ERROR: Password file is empty: $PASSWORD_FILE" >&2
+    log_error "Password file is empty: $PASSWORD_FILE"
+    log_info "Suggestion: Add the PDF password as the first line in the file"
     exit 2
   fi
 fi
@@ -191,15 +261,35 @@ fi
 # Validate JPEG quality
 if [[ -n "$JPEGQ_OVERRIDE" ]]; then
   if ! [[ "$JPEGQ_OVERRIDE" =~ ^[0-9]+$ ]] || (( JPEGQ_OVERRIDE < 1 || JPEGQ_OVERRIDE > 100 )); then
-    echo "ERROR: JPEG quality must be between 1 and 100 (got: $JPEGQ_OVERRIDE)" >&2
+    log_error "JPEG quality must be between 1 and 100 (got: $JPEGQ_OVERRIDE)"
+    log_info "Suggestion: Use -q with a value between 1 (lowest quality) and 100 (highest quality)"
+    log_info "           Recommended: 68 (extreme), 74 (standard), 78 (light)"
     exit 2
   fi
 fi
 
 # Validate jobs parameter
 if ! [[ "$JOBS" =~ ^[0-9]+$ ]] || (( JOBS < 1 )); then
-  echo "ERROR: --jobs must be a positive integer (got: $JOBS)" >&2
+  log_error "--jobs must be a positive integer (got: $JOBS)"
+  log_info "Suggestion: Use --jobs 4 for 4 parallel workers (requires GNU parallel or xargs -P)"
   exit 2
+fi
+
+# Validate and parse memory limit
+MEMORY_LIMIT_BYTES=""
+if [[ -n "$MEMORY_LIMIT" ]]; then
+  MEMORY_LIMIT_BYTES="$(parse_bytes "$MEMORY_LIMIT")"
+  if [[ -z "$MEMORY_LIMIT_BYTES" ]]; then
+    log_error "Invalid memory limit format: $MEMORY_LIMIT"
+    log_info "Suggestion: Use format like --memory-limit 512M or --memory-limit 2G"
+    exit 2
+  fi
+fi
+
+# Validate backup option
+if $BACKUP && ! $INPLACE; then
+  log_warn "--backup has no effect without --inplace"
+  log_info "Suggestion: Use --inplace --backup to create .bak files before replacing originals"
 fi
 
 check_deps() {
@@ -244,6 +334,69 @@ check_deps() {
   return $missing
 }
 
+# Cross-platform stat helpers
+size_of() {
+  { command gstat -c%s "$1" 2>/dev/null || \
+    stat -f%z "$1" 2>/dev/null || \
+    stat -c%s "$1" 2>/dev/null; }
+}
+
+stat_time() {
+  local file="$1" type="$2"  # type: atime or mtime
+  case "$type" in
+    atime) { command gstat -c %X "$file" 2>/dev/null || \
+             stat -f %a "$file" 2>/dev/null || \
+             stat -c %X "$file" 2>/dev/null; } ;;
+    mtime) { command gstat -c %Y "$file" 2>/dev/null || \
+             stat -f %m "$file" 2>/dev/null || \
+             stat -c %Y "$file" 2>/dev/null; } ;;
+    *) echo "0" ;;
+  esac
+}
+
+parse_bytes() {
+  local s="${1:-}"; [[ -z "$s" ]] && { echo ""; return; }
+  s="${s//[[:space:]]/}"; s="${s:u}"
+  [[ "$s" =~ '^[0-9]+$' ]] && { echo "$s"; return; }
+  if print -r -- "$s" | command grep -E -q '^[0-9]+(\.[0-9]+)?(K|KB|M|MB|G|GB)$'; then
+    local n="${s%[KkMmGg][Bb]}" u="${s##*[0-9]}"
+    case "$u" in
+      K|KB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024}' ;;
+      M|MB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024}' ;;
+      G|GB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024*1024}' ;;
+    esac; return
+  fi
+  echo "ERROR: Invalid SIZE format: '$1'. Expected format: 200K, 1.5MB, 2GB" >&2; exit 2
+}
+
+fmt_bytes() {
+  local b="$1"
+  awk -v b="$b" 'BEGIN{
+    if (b<1024){printf "%d B", b; exit}
+    kb=b/1024; if (kb<1024){printf "%.1f KB", kb; exit}
+    mb=kb/1024; if (mb<1024){printf "%.2f MB", mb; exit}
+    gb=mb/1024; printf "%.2f GB", gb
+  }'
+}
+
+# Initialize cache directory
+init_cache() {
+  mkdir -p "$CACHE_DIR" 2>/dev/null || true
+  chmod 700 "$CACHE_DIR" 2>/dev/null || true
+}
+
+# Check if cache file is fresh (within TTL)
+is_cache_fresh() {
+  local cache_file="$1"
+  [[ -f "$cache_file" ]] || return 1
+
+  local cache_mtime=$(stat_time "$cache_file" mtime)
+  local now=$(date +%s)
+  local age=$((now - cache_mtime))
+
+  [[ $age -lt $CACHE_TTL ]]
+}
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "ERROR: Missing required dependency: $1" >&2
@@ -253,8 +406,36 @@ need() {
 }
 if $CHECK_DEPS; then check_deps; exit $?; fi
 
-for t in pdfcpu qpdf mutool exiftool pdfinfo pdfimages gs sha256sum; do need "$t"; done
-PARALLEL_OK=false; command -v parallel >/dev/null 2>&1 && PARALLEL_OK=true
+# Check dependencies with caching
+init_cache
+
+# Initialize PARALLEL_OK to false (will be set to true if parallel is available)
+PARALLEL_OK=false
+
+# Try to load cached dependency check results
+if is_cache_fresh "$DEPS_CACHE"; then
+  # Cache is fresh, load it
+  source "$DEPS_CACHE" 2>/dev/null || {
+    # Cache corrupted, regenerate
+    rm -f "$DEPS_CACHE" 2>/dev/null || true
+  }
+fi
+
+# If not cached or cache was corrupted, run checks and cache results
+if [[ ! -f "$DEPS_CACHE" ]] || ! is_cache_fresh "$DEPS_CACHE"; then
+  # Run dependency checks
+  for t in pdfcpu qpdf mutool exiftool pdfinfo pdfimages gs sha256sum; do need "$t"; done
+  PARALLEL_OK=false; command -v parallel >/dev/null 2>&1 && PARALLEL_OK=true
+
+  # Cache results (store as shell variables)
+  {
+    echo "# pdf-deflyt dependency cache - $(date)"
+    echo "PARALLEL_OK=$PARALLEL_OK"
+  } > "$DEPS_CACHE" 2>/dev/null || true
+else
+  # Using cached results, still verify critical dependencies exist
+  for t in pdfcpu qpdf mutool exiftool pdfinfo pdfimages gs sha256sum; do need "$t"; done
+fi
 
 is_pdf() { [[ "${1:l}" == *.pdf ]]; }
 gather_one() {
@@ -307,26 +488,6 @@ if ! $INTERNAL_ONE; then
   [[ ${#FILES[@]} -ge 1 ]] || { echo "ERROR: No PDF files remaining after applying filters" >&2; exit 1; }
 fi
 
-# Cross-platform stat helpers
-size_of() {
-  { command gstat -c%s "$1" 2>/dev/null || \
-    stat -f%z "$1" 2>/dev/null || \
-    stat -c%s "$1" 2>/dev/null; }
-}
-
-stat_time() {
-  local file="$1" type="$2"  # type: atime or mtime
-  case "$type" in
-    atime) { command gstat -c %X "$file" 2>/dev/null || \
-             stat -f %a "$file" 2>/dev/null || \
-             stat -c %X "$file" 2>/dev/null; } ;;
-    mtime) { command gstat -c %Y "$file" 2>/dev/null || \
-             stat -f %m "$file" 2>/dev/null || \
-             stat -c %Y "$file" 2>/dev/null; } ;;
-    *) echo "0" ;;
-  esac
-}
-
 restore_times() { touch -r "$1" "$2" 2>/dev/null || true; }
 
 unique_filename() {
@@ -342,33 +503,26 @@ unique_filename() {
   echo "$candidate"
 }
 
-parse_bytes() {
-  local s="${1:-}"; [[ -z "$s" ]] && { echo ""; return; }
-  s="${s//[[:space:]]/}"; s="${s:u}"
-  [[ "$s" =~ '^[0-9]+$' ]] && { echo "$s"; return; }
-  if print -r -- "$s" | command grep -E -q '^[0-9]+(\.[0-9]+)?(K|KB|M|MB|G|GB)$'; then
-    local n="${s%[KkMmGg][Bb]}" u="${s##*[0-9]}"
-    case "$u" in
-      K|KB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024}' ;;
-      M|MB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024}' ;;
-      G|GB) awk -v n="$n" 'BEGIN{printf "%.0f", n*1024*1024*1024}' ;;
-    esac; return
-  fi
-  echo "ERROR: Invalid SIZE format: '$1'. Expected format: 200K, 1.5MB, 2GB" >&2; exit 2
-}
-
-fmt_bytes() {
-  local b="$1"
-  awk -v b="$b" 'BEGIN{
-    if (b<1024){printf "%d B", b; exit}
-    kb=b/1024; if (kb<1024){printf "%.1f KB", kb; exit}
-    mb=kb/1024; if (mb<1024){printf "%.2f MB", mb; exit}
-    gb=mb/1024; printf "%.2f GB", gb
-  }'
-}
-
 analyse_pdf() {
   local f="$1"
+
+  # Generate cache key based on file path and modification time
+  local file_mtime=$(stat_time "$f" mtime)
+  local cache_key=$(echo -n "${f}:${file_mtime}" | sha256sum | awk '{print $1}')
+  local analysis_cache="$CACHE_DIR/analysis_${cache_key}.cache"
+
+  # Check if we have a fresh cached analysis
+  if [[ -f "$analysis_cache" ]] && is_cache_fresh "$analysis_cache"; then
+    # Verify the cached mtime matches current file mtime
+    local cached_mtime=$(head -n1 "$analysis_cache" 2>/dev/null | cut -d: -f2)
+    if [[ "$cached_mtime" == "$file_mtime" ]]; then
+      # Cache is valid, return cached result
+      tail -n1 "$analysis_cache" 2>/dev/null || echo "0 0 0 0 0 0 0 0 0"
+      return
+    fi
+  fi
+
+  # No cache or cache invalid, run analysis
   local list
   if ! list="$(pdfimages -list "$f" 2>/dev/null)"; then
     echo "0 0 0 0 0 0 0 0 0"; return
@@ -429,7 +583,17 @@ analyse_pdf() {
              C_CNT, G_CNT, M_CNT, C_MED, G_MED, M_MED, C_MIN, G_MIN, M_MIN
     }')
 
-  [[ -n "$parsed" ]] && echo "$parsed" || echo "0 0 0 0 0 0 0 0 0"
+  # Cache the analysis result for reuse
+  if [[ -n "$parsed" ]]; then
+    # Write cache: store mtime and parsed result
+    {
+      echo "mtime:${file_mtime}"
+      echo "$parsed"
+    } > "$analysis_cache" 2>/dev/null || true
+    echo "$parsed"
+  else
+    echo "0 0 0 0 0 0 0 0 0"
+  fi
 }
 
 sha_sidecar() {
@@ -441,8 +605,94 @@ sha_sidecar() {
   return 0
 }
 
+validate_pdf() {
+  local file="$1"
+  log_verbose "Validating PDF: ${file##*/}"
+
+  # Quick check with pdfinfo
+  if ! pdfinfo "$file" >/dev/null 2>&1; then
+    log_error "PDF validation failed (pdfinfo): ${file##*/}"
+    log_info "Suggestion: The PDF may be corrupt. Try opening it in a PDF viewer to confirm."
+    return 1
+  fi
+
+  # Thorough check with qpdf if requested
+  if $VALIDATE; then
+    if ! qpdf --check "$file" >/dev/null 2>&1; then
+      log_error "PDF validation failed (qpdf --check): ${file##*/}"
+      log_info "Suggestion: The PDF structure may be damaged. Consider using qpdf --check for details."
+      return 1
+    fi
+    log_verbose "PDF validation passed: ${file##*/}"
+  fi
+
+  return 0
+}
+
+# Print batch summary statistics
+print_batch_summary() {
+  local end_time=$(date +%s)
+  local elapsed=$((end_time - STATS_START_TIME))
+
+  # Convert elapsed time to human-readable format
+  local hours=$((elapsed / 3600))
+  local minutes=$(( (elapsed % 3600) / 60 ))
+  local seconds=$((elapsed % 60))
+
+  local time_str=""
+  if (( hours > 0 )); then
+    time_str="${hours}h ${minutes}m ${seconds}s"
+  elif (( minutes > 0 )); then
+    time_str="${minutes}m ${seconds}s"
+  else
+    time_str="${seconds}s"
+  fi
+
+  # Calculate total savings
+  local total_saved=0
+  local avg_ratio=0
+  local avg_savings=0
+
+  if (( STATS_BYTES_IN > 0 )); then
+    total_saved=$((STATS_BYTES_IN - STATS_BYTES_OUT))
+    avg_ratio=$(awk -v out="$STATS_BYTES_OUT" -v in="$STATS_BYTES_IN" 'BEGIN{printf "%.2f", out/in}')
+    avg_savings=$(awk -v out="$STATS_BYTES_OUT" -v in="$STATS_BYTES_IN" 'BEGIN{printf "%.1f", (1-out/in)*100}')
+  fi
+
+  echo
+  echo "${C_BOLD}${C_GREEN}═══════════════════════════════════════════════════════════${C_RESET}"
+  echo "${C_BOLD}                    Batch Summary${C_RESET}"
+  echo "${C_BOLD}${C_GREEN}═══════════════════════════════════════════════════════════${C_RESET}"
+  echo
+  echo "${C_BOLD}Files:${C_RESET}"
+  echo "  Total:      ${C_BOLD}${STATS_TOTAL}${C_RESET}"
+  echo "  Processed:  ${C_GREEN}${STATS_PROCESSED}${C_RESET}"
+  echo "  Skipped:    ${C_YELLOW}${STATS_SKIPPED}${C_RESET}"
+  echo "  Failed:     ${C_RED}${STATS_FAILED}${C_RESET}"
+  echo
+
+  if (( STATS_PROCESSED > 0 )); then
+    echo "${C_BOLD}Compression:${C_RESET}"
+    echo "  Input size:      $(fmt_bytes "$STATS_BYTES_IN")"
+    echo "  Output size:     $(fmt_bytes "$STATS_BYTES_OUT")"
+    echo "  Space saved:     ${C_GREEN}$(fmt_bytes "$total_saved")${C_RESET} (${C_BOLD}${avg_savings}%${C_RESET})"
+    echo "  Avg ratio:       ${avg_ratio}"
+    echo
+  fi
+
+  echo "${C_BOLD}Time:${C_RESET}"
+  echo "  Total:       ${time_str}"
+  if (( STATS_PROCESSED > 0 )); then
+    local avg_time=$((elapsed / STATS_PROCESSED))
+    echo "  Per file:    ${avg_time}s avg"
+  fi
+  echo
+  echo "${C_BOLD}${C_GREEN}═══════════════════════════════════════════════════════════${C_RESET}"
+  echo
+}
+
 gs_pass() {
-  local in="$1" out="$2" jpegq="$3" deterministic="$4" C_RES="$5" G_RES="$6" M_RES="$7"
+  local in="$1" out="$2" jpegq="$3" deterministic="$4" C_RES="$5" G_RES="$6" M_RES="$7" mem_limit="${8:-}"
 
   local -a GS_COMMON
   GS_COMMON=(
@@ -454,6 +704,11 @@ gs_pass() {
     -dEncodeColorImages=true -dEncodeGrayImages=true -dEncodeMonoImages=true
     -dNOPAUSE -dBATCH
   )
+
+  # Apply memory limit if specified
+  if [[ -n "$mem_limit" && "$mem_limit" -gt 0 ]]; then
+    GS_COMMON+=(-dBufferSpace="$mem_limit")
+  fi
 
   if (( C_RES > 0 )); then
     GS_COMMON+=(-dDownsampleColorImages=true -dColorImageDownsampleType=/Bicubic -dColorImageResolution="$C_RES")
@@ -583,7 +838,7 @@ process_one() {
   # Handle encryption
   local encrypted="no"
   if [[ -n "$PASS" ]]; then
-    local dec="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dec.XXXXXXXX")"
+    local dec="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dec.XXXXXXXX.pdf")"
     chmod 600 "$dec"  # Restrict permissions immediately
     if qpdf --password="$PASS" --decrypt "$IN" "$dec" >/dev/null 2>&1; then
       IN="$dec"
@@ -591,12 +846,12 @@ process_one() {
     else
       rm -f "$dec" 2>/dev/null || true
       log "SKIP: $orig (incorrect password)"
-      return 0
+      return 1
     fi
   else
     if pdfinfo "$IN" 2>/dev/null | command egrep -qi '^Encrypted:\s*yes'; then
       log "SKIP: $IN (encrypted - use --password or --password-file to process)"
-      return 0
+      return 1
     fi
   fi
 
@@ -612,14 +867,19 @@ process_one() {
   fi
 
   local dir="$(dirname "$IN")"
-  local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.opt.XXXXXXXX")"
-  local tmp2="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.gs.XXXXXXXX")"
-  local tmp3="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.fin.XXXXXXXX")"
+  local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.opt.XXXXXXXX.pdf")"
+  local tmp2="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.gs.XXXXXXXX.pdf")"
+  local tmp3="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.fin.XXXXXXXX.pdf")"
   chmod 600 "$tmp1" "$tmp2" "$tmp3"
 
   setopt localtraps
-  cleanup() { rm -f "$tmp1" "$tmp2" "$tmp3" 2>/dev/null || true; }
-  trap 'cleanup' EXIT
+  cleanup() {
+    # Clean up all temp files, including intermediate files from failed operations
+    rm -f "$tmp1" "$tmp2" "$tmp3" "${tmp3}.w" "${tmp3}.c" 2>/dev/null || true
+    # If decrypted file exists in this scope, clean it up too
+    [[ -n "${dec:-}" && -f "$dec" ]] && rm -f "$dec" 2>/dev/null || true
+  }
+  trap 'cleanup' EXIT INT TERM
 
   local ORIG_BYTES=$(size_of "$orig")
 
@@ -712,7 +972,7 @@ process_one() {
       cp "$tmp1" "$tmp2"
     fi
   elif [[ "$PRE" == "aggressive" ]]; then
-    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES"; then
+    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" "$MEMORY_LIMIT_BYTES"; then
       log "WARNING: Ghostscript compression failed, using structural compression only"
     fi
     [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
@@ -721,7 +981,7 @@ process_one() {
     log "NOTICE: Images below target resolution, using structural compression only"
     cp "$tmp1" "$tmp2"
   else
-    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES"; then
+    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" "$MEMORY_LIMIT_BYTES"; then
       log "WARNING: Ghostscript compression failed, using structural compression only"
     fi
     [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
@@ -749,9 +1009,25 @@ process_one() {
   local SAVEPCT=$(awk -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{printf "%.2f",(b>0)?(100*(1-a/b)):0}')
   local replace_ok=$(awk -v s="$SAVEPCT" -v m="$MINGAIN" -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{print (a<b && s>=m)?1:0}')
   local note="ok"
-  
+
+  # Validate compressed PDF before using it
+  if ! validate_pdf "$tmp3"; then
+    log_error "Compressed PDF failed validation, keeping original: ${orig##*/}"
+    note="validation-failed"
+    replace_ok=0
+  fi
+
   if [[ "$replace_ok" -eq 1 ]]; then
     if $INPLACE; then
+      # Create backup if requested
+      if $BACKUP; then
+        local backup_file="${orig}.bak"
+        if cp "$orig" "$backup_file" 2>/dev/null; then
+          log_verbose "Created backup: ${backup_file##*/}"
+        else
+          log_warn "Failed to create backup file: $backup_file"
+        fi
+      fi
       mv "$tmp3" "$orig"
       $KEEP_DT && restore_times "$orig" "$orig"
       OUT="$orig"
@@ -781,7 +1057,17 @@ process_one() {
     local ratio=$(awk -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{printf "%.4f",(b>0)?a/b:1}')
     printf '%s,%s,%s,%.4f,%s,%s\n' "$orig" "$ORIG_BYTES" "$OUT_BYTES" "$ratio" "$PRE" "$note" >> "$LOGFILE"
   fi
-  
+
+  # Update batch statistics (only in sequential mode, not in worker processes)
+  if ! $INTERNAL_ONE; then
+    ((STATS_TOTAL++))
+    if [[ "$note" == "ok" || "$note" == "kept-original" || "$note" == "validation-failed" ]]; then
+      ((STATS_PROCESSED++))
+      ((STATS_BYTES_IN += ORIG_BYTES))
+      ((STATS_BYTES_OUT += OUT_BYTES))
+    fi
+  fi
+
   $QUIET || printf '→ %s  (%.1f%% smaller)  [%s]\n' "$OUT" "$SAVEPCT" "$note"
   cleanup
 }
@@ -790,16 +1076,29 @@ run_wrapper() {
   emulate -L zsh
   local f="$1" out="${2-}"
 
-  [[ -z "$f" ]] && { log "SKIP (empty path)"; return 0; }
-  [[ ! -r "$f" ]] && { log "SKIP (unreadable): $f"; return 0; }
+  if [[ -z "$f" ]]; then
+    log "SKIP (empty path)"
+    ! $INTERNAL_ONE && ((STATS_TOTAL++)) && ((STATS_SKIPPED++))
+    return 0
+  fi
+
+  if [[ ! -r "$f" ]]; then
+    log "SKIP (unreadable): $f"
+    ! $INTERNAL_ONE && ((STATS_TOTAL++)) && ((STATS_SKIPPED++))
+    return 0
+  fi
 
   if [[ -n "${SKIP_UNDER_RESOLVED:-}" ]]; then
     local sz=$(size_of "$f")
-    [[ -n "$sz" && "$sz" -lt "$SKIP_UNDER_RESOLVED" ]] && { log "SKIP (too small): $f"; return 0; }
+    if [[ -n "$sz" && "$sz" -lt "$SKIP_UNDER_RESOLVED" ]]; then
+      log "SKIP (too small): $f"
+      ! $INTERNAL_ONE && ((STATS_TOTAL++)) && ((STATS_SKIPPED++))
+      return 0
+    fi
   fi
 
   if [[ "${DRYRUN:-false}" == true ]]; then
-    local tmp1="$(mktemp -t pdfdeflyt.dry.XXXXXX)"
+    local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dry.XXXXXXXX.pdf")"
     local ORIG_BYTES=$(size_of "$f")
 
     pdfcpu optimize -quiet "$f" "$tmp1" >/dev/null 2>&1 || cp "$f" "$tmp1" || { echo "DRY: $f (unreadable)"; return 0; }
@@ -843,19 +1142,34 @@ run_wrapper() {
     return 0
   fi
 
+  # Call process_one and capture return code for statistics tracking
+  local rc=0
   process_one "$f" "$out" "$PRESET" "$JPEGQ_OVERRIDE" "$INPLACE" "$KEEP_METADATA" "$KEEP_DATE" \
-              "$MIN_GAIN" "$DETERMINISTIC" "$PASSWORD" "$POST_HOOK" "$SIDECAR"
+              "$MIN_GAIN" "$DETERMINISTIC" "$PASSWORD" "$POST_HOOK" "$SIDECAR" || rc=$?
+
+  # Track failures and skips in statistics (only in sequential mode)
+  if ! $INTERNAL_ONE; then
+    if (( rc == 1 )); then
+      ((STATS_TOTAL++))
+      ((STATS_SKIPPED++))
+    elif (( rc == 2 )); then
+      ((STATS_TOTAL++))
+      ((STATS_FAILED++))
+    fi
+  fi
+
+  return $rc
 }
 
 if $INTERNAL_ONE; then
-  f="${FILES[1]}"; run_wrapper "$f" ""; exit 0
+  f="${FILES[1]}"; run_wrapper "$f" "" || true; exit 0
 fi
 if [[ -n "$OUT_SINGLE" ]]; then
-  run_wrapper "${FILES[1]}" "$OUT_SINGLE"; exit 0
+  run_wrapper "${FILES[1]}" "$OUT_SINGLE" || true; exit 0
 fi
 
 if (( JOBS > 1 )) && $PARALLEL_OK; then
-  # Progress indicator for parallel mode
+  # GNU parallel mode (best performance)
   local total="${#FILES[@]}"
   $QUIET || (( total > 1 )) && log "Processing $total files in parallel (${JOBS} workers)..."
 
@@ -864,20 +1178,49 @@ if (( JOBS > 1 )) && $PARALLEL_OK; then
       DETERMINISTIC="$DETERMINISTIC" PASSWORD="$PASSWORD" POST_HOOK="$POST_HOOK" \
       SIDECAR="$SIDECAR" DRYRUN="$DRYRUN" DEBUG="$DEBUG" \
       SKIP_UNDER_BYTES="$SKIP_UNDER_BYTES" SKIP_UNDER_RESOLVED="$SKIP_UNDER_RESOLVED" \
+      MEMORY_LIMIT_BYTES="$MEMORY_LIMIT_BYTES" \
       LOGFILE="$LOGFILE" QUIET="$QUIET" \
   command parallel -j "$JOBS" --no-notice --will-cite -- \
     "$0" --internal-one {} ::: "${FILES[@]}"
+elif (( JOBS > 1 )) && command -v xargs >/dev/null 2>&1 && echo test | xargs -P 1 echo >/dev/null 2>&1; then
+  # xargs -P fallback mode (when GNU parallel is unavailable)
+  local total="${#FILES[@]}"
+  $QUIET || (( total > 1 )) && log "Processing $total files in parallel using xargs (${JOBS} workers)..."
+
+  # Export variables for child processes
+  export PRESET JPEGQ_OVERRIDE INPLACE KEEP_METADATA KEEP_DATE MIN_GAIN \
+         DETERMINISTIC PASSWORD POST_HOOK SIDECAR DRYRUN DEBUG \
+         SKIP_UNDER_BYTES SKIP_UNDER_RESOLVED MEMORY_LIMIT_BYTES LOGFILE QUIET
+
+  # Use xargs -P for parallel processing
+  printf '%s\0' "${FILES[@]}" | \
+    xargs -0 -P "$JOBS" -I {} "$0" --internal-one {}
 else
-  # Progress indicator for sequential mode
+  # Sequential fallback mode
   local total="${#FILES[@]}"
   local current=0
 
+  # Initialize batch statistics
+  STATS_START_TIME=$(date +%s)
+  STATS_TOTAL=0
+  STATS_PROCESSED=0
+  STATS_SKIPPED=0
+  STATS_FAILED=0
+  STATS_BYTES_IN=0
+  STATS_BYTES_OUT=0
+
   for f in "${FILES[@]}"; do
-    ((current++))
+    (( current = current + 1 ))
     if ! $QUIET && (( total > 1 )); then
       local basename="${f##*/}"
-      printf 'Processing (%d/%d): %s\n' "$current" "$total" "$basename" >&2
+      local pct=$(awk -v c="$current" -v t="$total" 'BEGIN{printf "%.0f", (c/t)*100}')
+      printf '[%3d%%] (%d/%d) %s\n' "$pct" "$current" "$total" "$basename" >&2
     fi
-    run_wrapper "$f" ""
+    run_wrapper "$f" "" || true
   done
+
+  # Print batch summary if processing multiple files
+  if (( total > 1 )) && ! $QUIET && ! $DRYRUN; then
+    print_batch_summary
+  fi
 fi

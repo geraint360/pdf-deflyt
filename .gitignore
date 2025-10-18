@@ -3,8 +3,17 @@ devonthink-scripts/compiled/
 
 # Test artifacts
 tests/build/
+tests/build-*/
 tests/assets/
-tests/assets-smoke/
+tests/assets-*/
+*.bak
+
+# Benchmark results
+tests/benchmark_results.csv
+
+# Cache directories
+/tmp/pdf-deflyt-cache-*/
+.cache/
 
 # Python virtual environment
 .pdf-deflyt-venv/
@@ -12,12 +21,18 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Logs
+# Logs and CSV output
 *.log
+*.csv
 
 # Temporary files
 *.tmp
 .tmp.*
+*_deflyt.pdf
+
+# PDF sidecars (SHA256 checksums)
+*.pre.sha256
+*.post.sha256
 
 # Claude Code configuration (local only)
 CLAUDE.md
