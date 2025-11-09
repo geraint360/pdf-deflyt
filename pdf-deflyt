@@ -23,52 +23,77 @@ usage() {
 Usage:
   pdf-deflyt [OPTIONS] INPUT...
 
+Examples:
+  pdf-deflyt document.pdf              # Creates document_deflyt.pdf
+  pdf-deflyt --inplace *.pdf           # Compress in place (auto-backup)
+  pdf-deflyt --recurse ~/Documents     # Batch process folder
+  pdf-deflyt --dry-run *.pdf           # Preview savings
+
 Presets:
-  -p standard   (default) Auto-tuned per-PDF targets
-  -p light      C/G 300dpi; mono 1200dpi; JPEG Q~78
-  -p extreme    C/G 144dpi; mono 600dpi; JPEG Q~68
-  -p lossless   Structure-only; no image recompression
-  -p archive    C/G 240dpi; mono 900dpi; deterministic; strips metadata
+  -p standard   (default) Auto-tuned per-PDF based on content analysis
+  -p light      Higher quality, larger files (300dpi, Q78)
+  -p extreme    Maximum compression, smaller files (144dpi, Q68)
+  -p lossless   Structure-only, no image recompression (ultra-safe)
 
-Key Options:
-  --recurse                 Recurse for *.pdf
-  --jobs N                  Parallel workers (requires GNU parallel)
-  --inplace                 Replace originals atomically
-  --backup                  Create .bak files with --inplace
-  -o OUT                    Single output path (single input only)
-  -q N                      Force JPEG quality 1..100
-  --min-gain PCT            Skip if savings < PCT (default 1)
-  --skip-if-smaller SIZE    Skip files below SIZE (e.g. 200K, 1.5MB)
-  --memory-limit SIZE       Max memory for Ghostscript (e.g. 512M, 2G)
-  --dry-run                 Analyze only; show estimated savings
-  --validate                Validate PDFs after compression
-  --resume STATE            Resume interrupted batch job
-  --check-deps              Verify dependencies
+Common Options:
+  --inplace            Replace originals (creates automatic .bak backup)
+  --recurse            Process PDFs in subdirectories
+  -o FILE              Output path (single input only)
+  --dry-run            Analyze and show estimated savings without processing
 
-Output Control:
-  --quiet                   Minimal output
-  --verbose                 Detailed output
-  --debug                   Debug output (implies --verbose)
-  --color auto|always|never Control colored output (default: auto)
+Control:
+  --min-gain PCT       Skip files with < PCT savings (default: 1)
+  --skip-small SIZE    Skip files smaller than SIZE (e.g., 500K, 1MB)
+  --jobs N             Parallel workers (default: auto-detect cores)
+  --backup             Create .bak files with --inplace (default: enabled)
 
-Metadata/Timestamps:
-  --keep-metadata (default) | --strip-metadata
-  --keep-date (default)     | --no-keep-date
+Output:
+  --quiet              Minimal output
+  --verbose            Detailed output
+  --help, -h           Show this help
+  --help-advanced      Show advanced options
+  --version            Show version
+
+For advanced options (filtering, security, hooks, logging):
+  pdf-deflyt --help-advanced
+EOF
+  exit 2
+}
+
+advanced_usage() {
+  cat <<'EOF'
+Advanced Options for pdf-deflyt
 
 Security:
-  --password TEXT | --password-file FILE
-
-Determinism/Logs:
-  --deterministic (default) | --no-deterministic
-  --log CSV
+  --password TEXT          Decrypt password
+  --password-file FILE     Read password from file
 
 Filtering (regex on full path):
-  --exclude REGEX (repeatable)
-  --include REGEX (repeatable)
+  --exclude REGEX          Exclude files matching pattern (repeatable)
+  --include REGEX          Include only files matching pattern (repeatable)
 
-Sidecars & Hooks:
-  --sidecar-sha256
-  --post-hook 'CMD {}'       (env: IN, OUT, ORIG_BYTES, OUT_BYTES, PRESET, SAVEPCT)
+Validation & Recovery:
+  --validate               Validate PDFs after compression
+  --resume STATE           Resume interrupted batch job
+  --check-deps             Verify all dependencies are installed
+
+Automation & Logging:
+  --log CSV                Write processing log to CSV file
+  --sidecar-sha256         Create SHA256 sidecar files
+  --post-hook 'CMD {}'     Run command after each file
+                           Available env vars: IN, OUT, ORIG_BYTES, OUT_BYTES, PRESET, SAVEPCT
+
+Resource Control:
+  --memory-limit SIZE      Max memory for Ghostscript (e.g., 512M, 2G)
+
+Output Control:
+  --debug                  Debug output (implies --verbose)
+  --color auto|always|never Control colored output (default: auto)
+
+Notes:
+  - pdf-deflyt always preserves metadata and timestamps
+  - pdf-deflyt always produces deterministic output
+  - For most users, the basic options are sufficient
 EOF
   exit 2
 }
@@ -104,7 +129,6 @@ typeset -a ARGS FILES EXCLUDES INCLUDES
 
 # Compression settings
 PRESET="standard"
-JPEGQ_OVERRIDE=""
 
 # Output options
 OUT_SINGLE=""
@@ -133,10 +157,10 @@ SKIP_UNDER_BYTES=""
 # Resource management
 MEMORY_LIMIT=""
 
-# Metadata and timestamps
-KEEP_METADATA=true
-KEEP_DATE=true
-DETERMINISTIC=true
+# Metadata and timestamps (always enabled for consistency)
+readonly KEEP_METADATA=true
+readonly KEEP_DATE=true
+readonly DETERMINISTIC=true
 
 # Security
 PASSWORD=""
@@ -160,7 +184,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -p) PRESET="${2:-}"; shift 2 ;;
     -o) OUT_SINGLE="${2:-}"; shift 2 ;;
-    -q) JPEGQ_OVERRIDE="${2:-}"; shift 2 ;;
     --recurse) RECURSE=true; shift ;;
     --jobs) JOBS="${2:-1}"; shift 2 ;;
     --inplace) INPLACE=true; shift ;;
@@ -175,12 +198,6 @@ while [[ $# -gt 0 ]]; do
     --min-gain) MIN_GAIN="${2:-1}"; shift 2 ;;
     --skip-if-smaller) SKIP_UNDER_BYTES="${2:-}"; shift 2 ;;
     --memory-limit) MEMORY_LIMIT="${2:-}"; shift 2 ;;
-    --keep-metadata) KEEP_METADATA=true; shift ;;
-    --strip-metadata) KEEP_METADATA=false; shift ;;
-    --keep-date) KEEP_DATE=true; shift ;;
-    --no-keep-date) KEEP_DATE=false; shift ;;
-    --deterministic) DETERMINISTIC=true; shift ;;
-    --no-deterministic) DETERMINISTIC=false; shift ;;
     --password) PASSWORD="${2:-}"; shift 2 ;;
     --password-file) PASSWORD_FILE="${2:-}"; shift 2 ;;
     --post-hook) POST_HOOK="${2:-}"; shift 2 ;;
@@ -191,6 +208,7 @@ while [[ $# -gt 0 ]]; do
     --internal-one) INTERNAL_ONE=true; shift ;;
     --check-deps) CHECK_DEPS=true; shift ;;
     --help|-h) usage ;;
+    --help-advanced) advanced_usage ;;
     --version) echo "$VERSION"; exit 0 ;;
     --) shift; break ;;
     -*) echo "Unknown option: $1" >&2; usage ;;
@@ -734,14 +752,42 @@ gs_pass() {
   gs "${GS_COMMON[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1
 }
 
+gs_text_only_pass() {
+  local in="$1" out="$2" deterministic="$3" mem_limit="${4:-}"
+
+  local -a GS_TEXT_OPTS
+  GS_TEXT_OPTS=(
+    -sDEVICE=pdfwrite -dCompatibilityLevel=1.5
+    -dCompressFonts=true -dSubsetFonts=true -dEmbedAllFonts=true
+    -dAutoRotatePages=/None
+    -dColorConversionStrategy=/LeaveColorUnchanged
+    # Disable all image processing for text-only PDFs
+    -dDownsampleColorImages=false
+    -dDownsampleGrayImages=false
+    -dDownsampleMonoImages=false
+    -dAutoFilterColorImages=false
+    -dAutoFilterGrayImages=false
+    -dEncodeColorImages=false
+    -dEncodeGrayImages=false
+    -dEncodeMonoImages=false
+    -dNOPAUSE -dBATCH
+  )
+
+  # Apply memory limit if specified
+  [[ -n "$mem_limit" && "$mem_limit" -gt 0 ]] && GS_TEXT_OPTS+=(-dBufferSpace="$mem_limit")
+  $deterministic && GS_TEXT_OPTS+=(-dDeterministicIDs=true)
+
+  gs "${GS_TEXT_OPTS[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1
+}
+
 python_recompress_images() {
-  local in="$1" out="$2" jpegq="$3"
+  local in="$1" out="$2" jpegq="$3" c_res="$4" g_res="$5"
 
   # 1) If caller provided an explicit helper path, use it
   if [[ -n "$PDF_DEFLYT_HELPER" && -x "$PDF_DEFLYT_HELPER" ]]; then
     helper="$PDF_DEFLYT_HELPER"
   else
-    # 2) Resolve this script’s directory in zsh reliably (works in Shortcuts)
+    # 2) Resolve this script's directory in zsh reliably (works in Shortcuts)
     local this="${0:A}" 2>/dev/null || this="$0"
     local script_dir="${this:h}"
     local helper=""
@@ -759,7 +805,13 @@ python_recompress_images() {
 
   local verbose_flag=""
   [[ "${DEBUG:-false}" == true ]] && verbose_flag="-v"
-  "$helper" $verbose_flag -q "${jpegq:-75}" "$in" "$out" 2>&1
+
+  # Build DPI arguments as array
+  local -a dpi_args=()
+  [[ -n "$c_res" && "$c_res" -gt 0 ]] && dpi_args+=(--color-dpi "$c_res")
+  [[ -n "$g_res" && "$g_res" -gt 0 ]] && dpi_args+=(--gray-dpi "$g_res")
+
+  "$helper" $verbose_flag -q "${jpegq:-75}" "${dpi_args[@]}" "$in" "$out" 2>&1
 }
 
 estimate_savings() {
@@ -775,7 +827,7 @@ estimate_savings() {
   local c_gain=0 g_gain=0 mono_gain=0
   (( c_cnt > 0 )) && c_gain=$(f "$c_res" "$c_med")
   (( g_cnt > 0 )) && g_gain=$(f "$g_res" "$g_med")
-  
+
   if (( m_cnt > 0 )); then
     if (( m_med > 0 && m_res > 0 && m_res < m_med )); then
       mono_gain=$(f "$m_res" "$m_med")
@@ -831,14 +883,16 @@ process_one() {
     OUT="$OUT_REQ"
   fi
 
-  if $DEBUG; then 
+  if $DEBUG; then
     printf 'DEBUG: IN="%s" OUT="%s" PRESET=%s\n' "$IN" "$OUT" "$PRE"
   fi
-  
+
   # Handle encryption
   local encrypted="no"
   if [[ -n "$PASS" ]]; then
-    local dec="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dec.XXXXXXXX.pdf")"
+    local tmpdir="${TMPDIR:-/tmp}"
+    tmpdir="${tmpdir%/}"
+    local dec="$(mktemp "$tmpdir/pdf-deflyt.dec.XXXXXXXX.pdf")"
     chmod 600 "$dec"  # Restrict permissions immediately
     if qpdf --password="$PASS" --decrypt "$IN" "$dec" >/dev/null 2>&1; then
       IN="$dec"
@@ -867,9 +921,12 @@ process_one() {
   fi
 
   local dir="$(dirname "$IN")"
-  local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.opt.XXXXXXXX.pdf")"
-  local tmp2="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.gs.XXXXXXXX.pdf")"
-  local tmp3="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.fin.XXXXXXXX.pdf")"
+  # Strip trailing slash from TMPDIR to avoid double-slash issues with mktemp
+  local tmpdir="${TMPDIR:-/tmp}"
+  tmpdir="${tmpdir%/}"
+  local tmp1="$(mktemp "$tmpdir/pdf-deflyt.opt.XXXXXXXX.pdf")"
+  local tmp2="$(mktemp "$tmpdir/pdf-deflyt.gs.XXXXXXXX.pdf")"
+  local tmp3="$(mktemp "$tmpdir/pdf-deflyt.fin.XXXXXXXX.pdf")"
   chmod 600 "$tmp1" "$tmp2" "$tmp3"
 
   setopt localtraps
@@ -893,33 +950,44 @@ process_one() {
     fi
   fi
 
+  # Check if pdfcpu made file bigger (indicates already-optimized PDF)
+  local TMP1_BYTES=$(size_of "$tmp1")
+  local PDFCPU_MADE_BIGGER=false
+  if (( TMP1_BYTES > ORIG_BYTES )); then
+    PDFCPU_MADE_BIGGER=true
+    # Revert to original if pdfcpu made it bigger
+    cp "$IN" "$tmp1"
+  fi
+
   # Analyze images
   read -r C_CNT G_CNT M_CNT C_MED G_MED M_MED C_MIN G_MIN M_MIN <<<"$(analyse_pdf "$tmp1")"
   local NO_IMAGES=false; (( C_CNT + G_CNT + M_CNT == 0 )) && NO_IMAGES=true
 
   # Determine compression targets
-  local C_RES=200 G_RES=200 M_RES=900 JPEGQ=74 PRE_EFF="$PRE" KEEP_META_EFF="$KEEP_METADATA" DET_EFF="$DETERMINISTIC"
+  local C_RES=200 G_RES=200 M_RES=900 JPEGQ=74 PRE_EFF="$PRE"
   case "$PRE" in
     light)       C_RES=300; G_RES=300; M_RES=1200; JPEGQ=78 ;;
     extreme)     C_RES=144; G_RES=144; M_RES=600;  JPEGQ=68 ;;
     lossless)    C_RES=0;   G_RES=0;   M_RES=0 ;;
-    archive)     C_RES=240; G_RES=240; M_RES=900; KEEP_META_EFF=false; DET_EFF=true; JPEGQ=74 ;;
-    aggressive)  C_RES=0;   G_RES=0;   M_RES=0;   JPEGQ=75; KEEP_META_EFF=false; DET_EFF=true ;;
     standard)
-      if (( C_CNT > 0 )); then
-        local target=$(( ${C_MED%.*} >= 380 ? 220 : 200 ))
-        C_RES=$(( target > 150 ? target : 150 ))
+      # Smart detection: if no images, optimize for text-only
+      if [[ "$NO_IMAGES" == true ]]; then
+        C_RES=0; G_RES=0; M_RES=0; JPEGQ=0
+      else
+        if (( C_CNT > 0 )); then
+          local target=$(( ${C_MED%.*} >= 380 ? 220 : 200 ))
+          C_RES=$(( target > 150 ? target : 150 ))
+        fi
+        if (( G_CNT > 0 )); then
+          local target=$(( ${G_MED%.*} >= 380 ? 220 : 200 ))
+          G_RES=$(( target > 150 ? target : 150 ))
+        fi
+        if (( M_CNT > 0 )); then M_RES=$(( ${M_MED%.*} >= 900 ? 900 : 600 )); fi
+        if (( C_CNT + G_CNT > 0 )); then JPEGQ=$(( (${C_MED%.*}+${G_MED%.*} >= 700) ? 68 : 72 )); fi
       fi
-      if (( G_CNT > 0 )); then
-        local target=$(( ${G_MED%.*} >= 380 ? 220 : 200 ))
-        G_RES=$(( target > 150 ? target : 150 ))
-      fi
-      if (( M_CNT > 0 )); then M_RES=$(( ${M_MED%.*} >= 900 ? 900 : 600 )); fi
-      if (( C_CNT + G_CNT > 0 )); then JPEGQ=$(( (${C_MED%.*}+${G_MED%.*} >= 700) ? 68 : 72 )); fi
       ;;
     *) echo "Unknown preset: $PRE" >&2; return 2 ;;
   esac
-  [[ -n "$JQ" ]] && JPEGQ="$JQ"
 
   if $DEBUG; then
     read -r EST_LOW EST_HIGH <<<"$(estimate_savings "$PRE" "$NO_IMAGES" "$C_CNT" "$G_CNT" "$M_CNT" "$C_MED" "$G_MED" "$M_MED" "$C_RES" "$G_RES" "$M_RES" "$JPEGQ")"
@@ -962,48 +1030,62 @@ process_one() {
   fi
 
   # Image compression
-  if [[ "$PRE" == "lossless" || "$NO_IMAGES" == true ]]; then
+  if [[ "$PRE" == "lossless" ]]; then
     cp "$tmp1" "$tmp2"
+  elif [[ "$NO_IMAGES" == true ]]; then
+    # Text-only PDF: use Ghostscript for font optimization unless already well-optimized
+    if $PDFCPU_MADE_BIGGER; then
+      # PDF is already well-optimized, skip further processing
+      $DEBUG && log "Text-only PDF already well-optimized (pdfcpu made it bigger), skipping Ghostscript"
+      cp "$tmp1" "$tmp2"
+    elif ! gs_text_only_pass "$tmp1" "$tmp2" "$DETERMINISTIC" "$MEMORY_LIMIT_BYTES"; then
+      $DEBUG && log "WARNING: Text-only Ghostscript optimization failed, using structural compression only"
+      cp "$tmp1" "$tmp2"
+    fi
   elif $HAS_ICC; then
     log "NOTICE: Detected ICC profile images, using ImageMagick-based compression"
-    if ! python_recompress_images "$tmp1" "$tmp2" "$JPEGQ"; then
+    # Repair PDF with qpdf before ICC processing to fix any xref issues from pdfcpu
+    local tmp1_repaired="${tmp1}.repaired"
+    if qpdf "$tmp1" "$tmp1_repaired" >/dev/null 2>&1; then
+      mv "$tmp1_repaired" "$tmp1"
+    fi
+    if ! python_recompress_images "$tmp1" "$tmp2" "$JPEGQ" "$C_RES" "$G_RES"; then
       log "WARNING: ImageMagick not found - using structural compression only (1-5% typical savings)"
       log "         Install ImageMagick for better compression: brew install imagemagick"
       cp "$tmp1" "$tmp2"
     fi
-  elif [[ "$PRE" == "aggressive" ]]; then
-    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" "$MEMORY_LIMIT_BYTES"; then
-      log "WARNING: Ghostscript compression failed, using structural compression only"
-    fi
-    [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
   elif (( (C_CNT > 0 && ${C_MIN%.*} > 0 && ${C_MIN%.*} < C_RES) || \
           (G_CNT > 0 && ${G_MIN%.*} > 0 && ${G_MIN%.*} < G_RES) )); then
     log "NOTICE: Images below target resolution, using structural compression only"
     cp "$tmp1" "$tmp2"
   else
-    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DET_EFF" "$C_RES" "$G_RES" "$M_RES" "$MEMORY_LIMIT_BYTES"; then
+    if ! gs_pass "$tmp1" "$tmp2" "$JPEGQ" "$DETERMINISTIC" "$C_RES" "$G_RES" "$M_RES" "$MEMORY_LIMIT_BYTES"; then
       log "WARNING: Ghostscript compression failed, using structural compression only"
     fi
     [[ ! -s "$tmp2" ]] && cp "$tmp1" "$tmp2"
   fi
 
-  # Final optimization
-  if ! pdfcpu optimize -quiet "$tmp2" "$tmp3" >/dev/null 2>&1; then
-    [[ -s "$tmp2" ]] && cp "$tmp2" "$tmp3" || cp "$tmp1" "$tmp3"
-  fi
-  if ! qpdf --linearize "$tmp3" "${tmp3}.w" >/dev/null 2>&1 || ! mv "${tmp3}.w" "$tmp3" 2>/dev/null; then
-    $DEBUG && log "WARNING: QPDF linearization failed, continuing without linearization"
-    rm -f "${tmp3}.w" 2>/dev/null || true
-  fi
-  if ! mutool clean -z "$tmp3" "${tmp3}.c" >/dev/null 2>&1 || ! mv "${tmp3}.c" "$tmp3" 2>/dev/null; then
-    $DEBUG && log "WARNING: MuPDF clean failed, continuing without additional cleaning"
-    rm -f "${tmp3}.c" 2>/dev/null || true
-  fi
-  if ! $KEEP_META_EFF; then
-    if ! exiftool -overwrite_original -all= "$tmp3" >/dev/null 2>&1; then
-      $DEBUG && log "WARNING: Metadata removal failed, continuing with metadata intact"
+  # Final optimization (skip for already-optimized text-only PDFs)
+  if [[ "$PDFCPU_MADE_BIGGER" == true && "$NO_IMAGES" == true ]]; then
+    # Already well-optimized, skip final processing to avoid bloat
+    cp "$tmp2" "$tmp3"
+    $DEBUG && log "Skipping final optimization for already-optimized text-only PDF"
+  else
+    if ! pdfcpu optimize -quiet "$tmp2" "$tmp3" >/dev/null 2>&1; then
+      [[ -s "$tmp2" ]] && cp "$tmp2" "$tmp3" || cp "$tmp1" "$tmp3"
+    fi
+    if $LINEARIZE; then
+      if ! qpdf --linearize "$tmp3" "${tmp3}.w" >/dev/null 2>&1 || ! mv "${tmp3}.w" "$tmp3" 2>/dev/null; then
+        $DEBUG && log "WARNING: QPDF linearization failed, continuing without linearization"
+        rm -f "${tmp3}.w" 2>/dev/null || true
+      fi
+    fi
+    if ! mutool clean -z "$tmp3" "${tmp3}.c" >/dev/null 2>&1 || ! mv "${tmp3}.c" "$tmp3" 2>/dev/null; then
+      $DEBUG && log "WARNING: MuPDF clean failed, continuing without additional cleaning"
+      rm -f "${tmp3}.c" 2>/dev/null || true
     fi
   fi
+  # Metadata and timestamps are always preserved (KEEP_METADATA=true, KEEP_DATE=true)
 
   local OUT_BYTES=$(size_of "$tmp3")
   local SAVEPCT=$(awk -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{printf "%.2f",(b>0)?(100*(1-a/b)):0}')
@@ -1052,7 +1134,7 @@ process_one() {
       log "WARNING: Post-hook command failed: $cmd"
     fi
   fi
-  
+
   if [[ -n "$LOGFILE" ]]; then
     local ratio=$(awk -v a="$OUT_BYTES" -v b="$ORIG_BYTES" 'BEGIN{printf "%.4f",(b>0)?a/b:1}')
     printf '%s,%s,%s,%.4f,%s,%s\n' "$orig" "$ORIG_BYTES" "$OUT_BYTES" "$ratio" "$PRE" "$note" >> "$LOGFILE"
@@ -1098,7 +1180,9 @@ run_wrapper() {
   fi
 
   if [[ "${DRYRUN:-false}" == true ]]; then
-    local tmp1="$(mktemp "${TMPDIR:-/tmp}/pdf-deflyt.dry.XXXXXXXX.pdf")"
+    local tmpdir="${TMPDIR:-/tmp}"
+    tmpdir="${tmpdir%/}"
+    local tmp1="$(mktemp "$tmpdir/pdf-deflyt.dry.XXXXXXXX.pdf")"
     local ORIG_BYTES=$(size_of "$f")
 
     pdfcpu optimize -quiet "$f" "$tmp1" >/dev/null 2>&1 || cp "$f" "$tmp1" || { echo "DRY: $f (unreadable)"; return 0; }

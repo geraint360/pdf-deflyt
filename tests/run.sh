@@ -36,7 +36,7 @@ cases=()
 cases_serial=()
 
 # 1) -o honored + basic compression for each preset
-for pre in light standard extreme lossless archive; do
+for pre in light standard extreme lossless; do
   out="$BUILD_DIR/out-${pre}.pdf"
   cases+=("o_${pre}::$ROOT/pdf-deflyt -p $pre \"$ASSETS_DIR/mixed.pdf\" -o \"$out\" && \
            [[ -f \"$out\" ]] && echo ok")

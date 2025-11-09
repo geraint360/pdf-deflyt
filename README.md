@@ -40,7 +40,7 @@ See [Examples](#examples) for more usage patterns.
 ## Features
 
 - Simple CLI: `pdf-deflyt input.pdf -o output.pdf` (or compress in place with `--inplace`)
-- Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**, **archive**
+- Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**
 - **ICC profile support**: Automatically detects and handles complex color profiles using ImageMagick
 - Batch processing (files or folders), recursion, include/exclude filters, and parallel jobs
 - Dry‑run estimator with projected size and savings (no writes)
@@ -132,9 +132,10 @@ pdf-deflyt [options] <file-or-dir>...
 
 ### Common Options
 
-- `-p, --preset <name>`  
-  One of `light`, `standard`, `extreme`, `lossless`, `archive`.  
+- `-p, --preset <name>`
+  One of `light`, `standard`, `extreme`, `lossless`.
   Tunes compression strength and quality trade-offs.
+  `standard` uses intelligent auto-detection based on PDF content.
 
 - `-o, --output <file>`  
   Explicit output file (single input only).  
@@ -181,48 +182,32 @@ If neither `-o` nor `--inplace` is used, results are written next to the input a
 
 ### Advanced Options
 
-- `-q <N>`  
-  Force JPEG quality (1–100).  
-  Overrides preset defaults (useful for custom tuning).
+For the full list of advanced options, run:
+```bash
+pdf-deflyt --help-advanced
+```
 
-- `--keep-metadata` *(default)*  
-  Preserve document metadata.
+Key advanced options include:
 
-- `--strip-metadata`  
-  Remove all metadata for smaller output or privacy.
-
-- `--keep-date` *(default)*  
-  Preserve original timestamps (mtime/atime) when writing new files.
-
-- `--no-keep-date`  
-  Update file timestamps to the compression completion time.
-
-- `--deterministic` *(default)*  
-  Ensures **stable, reproducible output** for identical inputs and presets.  
-  Useful for deduplication workflows.
-
-- `--non-deterministic`  
-  Allow compression libraries to vary slightly for speed at the cost of reproducibility.
-
-- `--password-file <FILE>`  
+- `--password-file <FILE>`
   Provide a password for encrypted PDFs via a file (safer than inline `--password`).
 
-- `--post-hook 'CMD {}'`  
-  Run a shell command after successfully processing each file.  
-  `{}` is replaced with the output path.  
-  Example:  
+- `--post-hook 'CMD {}'`
+  Run a shell command after successfully processing each file.
+  `{}` is replaced with the output path.
+  Example:
   ```bash
   --post-hook 'echo Compressed: {} >> ~/processed.log'
   ```
 
--	`--sidecar-sha256`
+- `--sidecar-sha256`
   Generate a .sha256 checksum file alongside each output.
   Useful for integrity checks, deduplication, and DEVONthink integration.
 
 - `--check-deps`
   Verify required and optional tool availability, then exit.
 
--	`--debug`
+- `--debug`
   Print computed parameters, selected DPI, JPEG quality, estimated savings, etc.
   Does not write files.
 
@@ -232,8 +217,9 @@ If neither `-o` nor `--inplace` is used, results are written next to the input a
 
 ### Preset strength ordering
 
-By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).  
-`lossless` preserves quality/structure as much as possible; `archive` aims for highest compression that still prints well.
+By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).
+`lossless` preserves quality/structure as much as possible with no image recompression.
+`standard` is intelligent and auto-detects whether PDFs are text-only or image-heavy.
 
 ---
 
@@ -370,27 +356,25 @@ pdf-deflyt --debug icc-document.pdf
 
 2. **Preset-driven image policy**  
    Each preset picks **target DPI** (per color/gray/mono) and **JPEG quality**.  
-   - `light`: gentle downsampling; good for already decent PDFs  
-   - `standard`: strong savings, safe for most scans  
-   - `extreme`: maximum shrinking while remaining legible  
-   - `lossless`: structural optimizations only; no lossy image recompression  
-   - `archive`: high compression tuned for printable distribution
+   - `light`: gentle downsampling; good for already decent PDFs
+   - `standard`: intelligent auto-tuning based on content; safe for most PDFs
+   - `extreme`: maximum shrinking while remaining legible
+   - `lossless`: structural optimizations only; no lossy image recompression
 
-3. **Ghostscript synthesis**  
+3. **Ghostscript synthesis**
    Ghostscript (`pdfwrite`) is used to:
-   - **Downsample** large raster images to preset DPIs  
-   - **Recompress** images (JPEG for color/gray, CCITT/Flate for mono)  
-   - **Linearize** and compact object streams  
-   - **Keep vector text/graphics** where feasible  
-   - Respect metadata/date flags (`--keep-metadata`, `--keep-date`)
+   - **Downsample** large raster images to preset DPIs
+   - **Recompress** images (JPEG for color/gray, CCITT/Flate for mono)
+   - **Compact object streams** and optimize PDF structure
+   - **Keep vector text/graphics** where feasible
 
-4. **Encrypted PDFs**  
-   - Without a password → **safe skip** (no modification).  
+4. **Encrypted PDFs**
+   - Without a password → **safe skip** (no modification).
    - With `--password`/`--password-file` → **decrypt to a temp**, process, then re-emit a normal PDF.
 
-5. **Determinism & timestamps**  
-   - `--deterministic` (default) yields reproducible results for identical inputs & presets.  
-   - `--keep-date` (default) preserves mtime/atime; `--no-keep-date` refreshes them.
+5. **Determinism & timestamps**
+   - Always produces deterministic output for reproducibility
+   - Always preserves metadata and timestamps
 
 6. **Safety rails**  
    - `--min-gain` keeps the original unless savings meet your threshold.  
@@ -400,27 +384,24 @@ pdf-deflyt --debug icc-document.pdf
 ### Preset guide (ballpark)
 | Preset    | Color/Gray DPI | JPEG Q | Mono DPI | Notes |
 |-----------|-----------------|--------|----------|-------|
-| light     | ~225–300        | 80–85  | 300–400  | Gentle; good for already-optimized PDFs |
-| standard  | ~180–225        | 72–80  | 300–400  | Solid default for scans & mixed docs |
-| extreme   | ~120–180        | 60–72  | 300      | Maximum shrink while staying readable |
-| lossless  | keep            | n/a    | keep     | No lossy recompress; structural tweaks only |
-| archive   | ~150–200        | 65–75  | 300–400  | Small + printable, suitable for distribution |
+| light     | ~300            | ~78    | ~1200    | Higher quality; good for already-optimized PDFs |
+| standard  | ~200 (auto)     | ~72    | ~900     | Intelligent auto-tuning based on content |
+| extreme   | ~144            | ~68    | ~600     | Maximum compression while staying readable |
+| lossless  | keep            | n/a    | keep     | No lossy recompression; structural tweaks only |
 
-> Exact knobs vary per-version; the intent is consistent: **balance size with legibility**. Use `--debug` to see the selected DPI/quality per run.
+> `standard` preset automatically detects text-only PDFs and adjusts strategy. Use `--debug` to see the selected DPI/quality per run.
 
 ---
 
 ## Integration Notes
 
 ### Determinism
-- `--deterministic` ensures bit-for-bit reproducibility for identical inputs when using the same preset and options.
-- `--no-deterministic` can produce slightly smaller outputs at the cost of reproducibility (e.g. due to non-fixed object IDs or encoding order).
+- pdf-deflyt always produces deterministic, reproducible output for identical inputs.
+- Useful for deduplication workflows and version control.
 
-### Metadata & Dates
-- By default, metadata and timestamps are preserved.
-- Use `--strip-metadata` for privacy-sensitive distributions or archival workflows.
-- Use `--keep-date` (default) to preserve access/modify times on output.
-- Use `--no-keep-date` to refresh timestamps to the compression time — useful for workflows where “last modified” should reflect the recompression.
+### Metadata & Timestamps
+- Metadata is always preserved for document integrity.
+- Timestamps (mtime/atime) are always preserved for file tracking.
 
 ### Exit Status Codes
 
@@ -474,7 +455,6 @@ By default, both scripts use **pdf-deflyt** with the **standard** compression pr
 
 Let DEVONthink complete OCR **before** compression (pdf-deflyt does **not** perform OCR).
 
-Smart Rules can safely run `--inplace mode`; timestamps are preserved unless overridden with --no-keep-date.
 
 ### Installation
 
@@ -509,7 +489,6 @@ Use the `--prefix` option if you need to override defaults.
 |----------|-----------------|
 | Safe default | `--inplace --min-gain 1` |
 | Scans & large PDFs | `-p standard --inplace --min-gain 3` |
-| Archival & privacy | `-p archive --inplace --min-gain 1 --strip-metadata` |
 
 ---
 
@@ -529,7 +508,7 @@ Use the `--prefix` option if you need to override defaults.
   Expected; there’s little to compress beyond structure.
 
 - **File looks slightly soft**  
-  Use `-p light`, or keep `standard` and raise quality (e.g., `-q 80`).
+  Use `-p light`, or keep `standard` and raise quality (e.g., `-p light`).
 
 - **“Missing: ghostscript / pdfcpu / qpdf / mutool / poppler / exiftool”**  
   Run:  

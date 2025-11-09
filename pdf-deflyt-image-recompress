@@ -69,8 +69,14 @@ import argparse
 IMAGEMAGICK_TIMEOUT = 30  # seconds for ImageMagick conversion operations
 PYMUPDF_GARBAGE_LEVEL = 4  # Level 4: aggressive garbage collection
 
-def convert_image_with_imagemagick(input_bytes, quality=75):
-    """Convert image to JPEG using ImageMagick (preserves ICC)"""
+def convert_image_with_imagemagick(input_bytes, quality=75, resize_percent=0):
+    """Convert image to JPEG using ImageMagick (preserves ICC)
+
+    Args:
+        input_bytes: Image data bytes
+        quality: JPEG quality (1-100)
+        resize_percent: Resize percentage for downsampling (0=no resize, e.g., 70=resize to 70%)
+    """
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_in:
         tmp_in.write(input_bytes)
         tmp_in_path = tmp_in.name
@@ -78,11 +84,16 @@ def convert_image_with_imagemagick(input_bytes, quality=75):
     tmp_out_path = tmp_in_path.replace('.png', '.jpg')
 
     try:
+        # Build resize argument if resize_percent is specified
+        resize_args = []
+        if resize_percent > 0 and resize_percent < 100:
+            resize_args = ['-resize', f'{resize_percent}%']
+
         # Try different ImageMagick command variants
         commands = [
-            ['magick', tmp_in_path, '-quality', str(quality), tmp_out_path],  # IM7 Linux style
-            ['magick', 'convert', tmp_in_path, '-quality', str(quality), tmp_out_path],  # IM7 macOS style
-            ['convert', tmp_in_path, '-quality', str(quality), tmp_out_path]  # IM6 style
+            ['magick', tmp_in_path] + resize_args + ['-quality', str(quality), tmp_out_path],  # IM7 Linux style
+            ['magick', 'convert', tmp_in_path] + resize_args + ['-quality', str(quality), tmp_out_path],  # IM7 macOS style
+            ['convert', tmp_in_path] + resize_args + ['-quality', str(quality), tmp_out_path]  # IM6 style
         ]
 
         for cmd in commands:
@@ -90,14 +101,14 @@ def convert_image_with_imagemagick(input_bytes, quality=75):
                 continue
 
             result = subprocess.run(cmd, capture_output=True, timeout=IMAGEMAGICK_TIMEOUT)
-            
+
             if result.returncode == 0 and os.path.exists(tmp_out_path):
                 with open(tmp_out_path, 'rb') as f:
                     jpeg_bytes = f.read()
                 return jpeg_bytes
-        
+
         return None
-        
+
     finally:
         # Clean up temp files - failures are non-fatal, OS will clean up /tmp
         try:
@@ -107,48 +118,94 @@ def convert_image_with_imagemagick(input_bytes, quality=75):
         except (OSError, IOError):
             pass
 
-def recompress_pdf_images(input_path, output_path, quality=75, verbose=False):
-    """Recompress images using ImageMagick for ICC safety"""
-    
+def recompress_pdf_images(input_path, output_path, quality=75, verbose=False, color_dpi=0, gray_dpi=0):
+    """Recompress images using ImageMagick for ICC safety
+
+    Args:
+        input_path: Input PDF path
+        output_path: Output PDF path
+        quality: JPEG quality (1-100)
+        verbose: Enable verbose output
+        color_dpi: Target DPI for color images (0=no downsampling)
+        gray_dpi: Target DPI for grayscale images (0=no downsampling)
+    """
+
     if not check_imagemagick():
         print("ERROR: ImageMagick not found. Install with: brew install imagemagick", file=sys.stderr)
         return 1
-    
+
     try:
         doc = fitz.open(input_path)
-        
+
         if verbose:
             print(f"Processing {len(doc)} pages...", file=sys.stderr)
-        
+
         for page_num in range(len(doc)):
             page = doc[page_num]
             image_list = page.get_images(full=True)
-            
+
             if verbose and image_list:
                 print(f"  Page {page_num + 1}: {len(image_list)} images", file=sys.stderr)
-            
+
             for img_index, img in enumerate(image_list):
                 xref = img[0]
-                
+                smask_xref = img[1] if len(img) > 1 else 0  # Soft mask reference
+
                 try:
+                    # Skip images with soft masks (transparency) - PyMuPDF's insert_image()
+                    # doesn't properly preserve transparency when re-inserting
+                    if smask_xref > 0:
+                        if verbose:
+                            print(f"    Image {img_index + 1}: Skipping (has transparency/smask)", file=sys.stderr)
+                        continue
+
+                    # Get image placement to calculate actual DPI
+                    img_rects = page.get_image_rects(xref)
+                    if not img_rects:
+                        if verbose:
+                            print(f"    Image {img_index + 1}: WARNING - Could not find image position, skipping", file=sys.stderr)
+                        continue
+
                     # Extract image
                     base_image = doc.extract_image(xref)
                     image_bytes = base_image["image"]
                     image_ext = base_image["ext"]
                     width = base_image["width"]
                     height = base_image["height"]
-                    
-                    # Skip if already JPEG
-                    if image_ext in ("jpeg", "jpg"):
-                        if verbose:
-                            print(f"    Image {img_index + 1}: already JPEG, skipping", file=sys.stderr)
-                        continue
-                    
+                    colorspace = base_image.get("colorspace", 3)  # Default to 3 (RGB/color)
+
+                    # Calculate actual DPI from image dimensions and page placement
+                    # Page coordinates are in points (72 points = 1 inch)
+                    rect = img_rects[0]  # Use first placement
+                    rendered_width_inches = rect.width / 72.0
+                    rendered_height_inches = rect.height / 72.0
+                    actual_dpi_x = width / rendered_width_inches if rendered_width_inches > 0 else 0
+                    actual_dpi_y = height / rendered_height_inches if rendered_height_inches > 0 else 0
+                    actual_dpi = (actual_dpi_x + actual_dpi_y) / 2  # Average
+
+                    # Determine target DPI based on colorspace
+                    # colorspace: 1=gray, 3=RGB, 4=CMYK
+                    target_dpi = 0
+                    if colorspace == 1 and gray_dpi > 0:
+                        target_dpi = gray_dpi
+                    elif colorspace in (3, 4) and color_dpi > 0:
+                        target_dpi = color_dpi
+
+                    # Calculate resize percentage (0 = no resize)
+                    resize_percent = 0
+                    if target_dpi > 0 and actual_dpi > target_dpi:
+                        resize_percent = int((target_dpi / actual_dpi) * 100)
+
                     if verbose:
-                        print(f"    Image {img_index + 1}: converting {image_ext} to JPEG with ImageMagick", file=sys.stderr)
-                    
+                        cs_name = "gray" if colorspace == 1 else "color"
+                        dpi_info = f", {int(actual_dpi)} → {target_dpi} DPI ({resize_percent}%)" if resize_percent > 0 else f", {int(actual_dpi)} DPI"
+                        if image_ext in ("jpeg", "jpg"):
+                            print(f"    Image {img_index + 1} ({cs_name}): recompressing JPEG (Q{quality}{dpi_info})", file=sys.stderr)
+                        else:
+                            print(f"    Image {img_index + 1} ({cs_name}): converting {image_ext} to JPEG (Q{quality}{dpi_info})", file=sys.stderr)
+
                     # Convert using ImageMagick
-                    new_image_bytes = convert_image_with_imagemagick(image_bytes, quality)
+                    new_image_bytes = convert_image_with_imagemagick(image_bytes, quality, resize_percent)
                     
                     if new_image_bytes is None:
                         if verbose:
@@ -160,16 +217,8 @@ def recompress_pdf_images(input_path, output_path, quality=75, verbose=False):
                         if verbose:
                             print(f"      Kept original (would be larger)", file=sys.stderr)
                         continue
-                    
-                    # Get the image rectangle (where it's placed on the page)
-                    img_rects = page.get_image_rects(xref)
-                    
-                    if not img_rects:
-                        if verbose:
-                            print(f"      WARNING: Could not find image position, skipping", file=sys.stderr)
-                        continue
-                    
-                    # Delete the old image
+
+                    # Delete the old image (we already have img_rects from earlier)
                     page.delete_image(xref)
                     
                     # Insert the new JPEG at each location where the old image was
@@ -203,15 +252,17 @@ def main():
     parser.add_argument('input', help='Input PDF file')
     parser.add_argument('output', help='Output PDF file')
     parser.add_argument('-q', '--quality', type=int, default=75, help='JPEG quality (1-100, default: 75)')
+    parser.add_argument('--color-dpi', type=int, default=0, help='Target DPI for color images (0=no downsampling)')
+    parser.add_argument('--gray-dpi', type=int, default=0, help='Target DPI for grayscale images (0=no downsampling)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
-    
+
     args = parser.parse_args()
-    
+
     if not Path(args.input).exists():
         print(f"ERROR: Input file not found: {args.input}", file=sys.stderr)
         return 1
-    
-    return recompress_pdf_images(args.input, args.output, args.quality, args.verbose)
+
+    return recompress_pdf_images(args.input, args.output, args.quality, args.verbose, args.color_dpi, args.gray_dpi)
 
 if __name__ == '__main__':
     sys.exit(main())

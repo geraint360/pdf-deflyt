@@ -5,7 +5,7 @@ It builds deterministic fixtures, runs parallelized checks across all presets, a
 
 ## What’s covered
 
-- Presets: `light`, `standard`, `extreme`, `lossless`, `archive`
+- Presets: `light`, `standard`, `extreme`, `lossless`
 - Output handling: `-o` (explicit output), default naming (`_deflyt`), paths with spaces
 - Estimation: `--dry-run` line appears with size + savings
 - In-place mode: `--inplace` preserves original mtime (within a small tolerance)
