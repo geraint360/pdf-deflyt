@@ -197,7 +197,7 @@ install_pdfcpu_linux_if_missing() {
   local bin
   bin="$(find "$dir" -type f -name pdfcpu -perm -111 | head -n1 || true)"
   [[ -n "$bin" ]] || die "pdfcpu binary not found in downloaded archive"
-  
+
   if [[ -w /usr/local/bin ]]; then
     sudo install -m 0755 "$bin" /usr/local/bin/pdfcpu
     log "[deps] pdfcpu -> /usr/local/bin/pdfcpu"
@@ -286,12 +286,12 @@ cleanup_other_dt_version_if_explicit() {
     4)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think3"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-            "$other/Smart Rules/PDF Squeeze (Smart Rule).scpt" 2>/dev/null || true
+            "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2>/dev/null || true
       ;;
     3)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-            "$other/Smart Rules/PDF Squeeze (Smart Rule).scpt" 2>/dev/null || true
+            "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2>/dev/null || true
       ;;
   esac
 }
@@ -299,12 +299,12 @@ cleanup_other_dt_version_if_explicit() {
 install_dt_scripts_macos() {
   local base_url="$REPO_RAW/devonthink-scripts/src"
   local src_menu_url="$base_url/Compress%20PDF%20Now.applescript"
-  local src_rule_url="$base_url/PDF%20Squeeze%20(Smart%20Rule).applescript"
+  local src_rule_url="$base_url/Compress%20PDF%20(Smart%20Rule).applescript"
 
   local tmp_dir src_menu src_rule
   tmp_dir="$(mktemp -d)"
   src_menu="$tmp_dir/Compress PDF Now.applescript"
-  src_rule="$tmp_dir/PDF Squeeze (Smart Rule).applescript"
+  src_rule="$tmp_dir/Compress PDF (Smart Rule).applescript"
 
   log "[get] Fetching AppleScript sources…"
   curl -fsSL -o "$src_menu" "$src_menu_url"
@@ -320,12 +320,12 @@ install_dt_scripts_macos() {
 
     /usr/bin/osacompile -o "$menu_dir/Compress PDF Now.scpt"         "$src_menu" \
       || { log "[get] ERROR: osacompile menu"; rm -rf "$tmp_dir"; return 1; }
-    /usr/bin/osacompile -o "$rules_dir/PDF Squeeze (Smart Rule).scpt" "$src_rule" \
+    /usr/bin/osacompile -o "$rules_dir/Compress PDF (Smart Rule).scpt" "$src_rule" \
       || { log "[get] ERROR: osacompile smart rule"; rm -rf "$tmp_dir"; return 1; }
 
     log "[get] Installed DT scripts to:"
     log "  - $menu_dir/Compress PDF Now.scpt"
-    log "  - $rules_dir/PDF Squeeze (Smart Rule).scpt"
+    log "  - $rules_dir/Compress PDF (Smart Rule).scpt"
   done < <(dt_target_dirs)
 
   rm -rf "$tmp_dir"
@@ -354,13 +354,13 @@ download_to() {
 
 install_files() {
   ensure_dirs
-  
+
   # Install main pdf-deflyt script
   local bin_dst="$INSTALL_PREFIX/pdf-deflyt"
   log "[get] Installing pdf-deflyt -> $bin_dst"
   download_to "$REPO_RAW/pdf-deflyt" "$bin_dst"
   chmod +x "$bin_dst"
-  
+
   # Install helper script for ICC profile images
   local helper_dst="$INSTALL_PREFIX/pdf-deflyt-image-recompress"
   log "[get] Installing pdf-deflyt-image-recompress -> $helper_dst"
@@ -378,7 +378,7 @@ uninstall_everything() {
   local bin_dst="$INSTALL_PREFIX/pdf-deflyt"
   local helper_dst="$INSTALL_PREFIX/pdf-deflyt-image-recompress"
   local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
-  
+
   if [[ -f "$bin_dst" ]]; then rm -f "$bin_dst"; log "[rm] $bin_dst"; removed=1; fi
   if [[ -f "$helper_dst" ]]; then rm -f "$helper_dst"; log "[rm] $helper_dst"; removed=1; fi
   if [[ -d "$venv_dir" ]]; then rm -rf "$venv_dir"; log "[rm] $venv_dir"; removed=1; fi
@@ -388,7 +388,7 @@ uninstall_everything() {
     while IFS= read -r base; do
       [[ -n "$base" ]] || continue
       local dt_menu="$base/Menu/Compress PDF Now.scpt"
-      local dt_rules="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+      local dt_rules="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
       if [[ -f "$dt_menu" ]];  then rm -f "$dt_menu";  log "[rm] $dt_menu";  removed=1; removed_dt=1; fi
       if [[ -f "$dt_rules" ]]; then rm -f "$dt_rules"; log "[rm] $dt_rules"; removed=1; removed_dt=1; fi
     done < <(dt_target_dirs)
@@ -430,7 +430,7 @@ verify_report() {
   echo
   echo "Optional dependencies:"
   echo "  parallel: $(command -v parallel || echo 'missing (batch processing will be serial)')"
-  
+
   # Check for ImageMagick (both IM6 and IM7)
   if command -v magick >/dev/null 2>&1; then
     echo "  imagemagick: $(command -v magick) (ICC profile support available)"
@@ -439,7 +439,7 @@ verify_report() {
   else
     echo "  imagemagick: missing (ICC profile images will use structural compression only)"
   fi
-  
+
   echo
   if on_macos; then
     if [[ $INSTALL_DT -eq 1 ]]; then
@@ -449,7 +449,7 @@ verify_report() {
         [[ -n "$base" ]] || continue
         any=1
         local menu="$base/Menu/Compress PDF Now.scpt"
-        local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+        local rule="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
         [[ -f "$menu" ]] && echo "  OK      $menu" || echo "  MISSING $menu"
         [[ -f "$rule" ]] && echo "  OK      $rule" || echo "  MISSING $rule"
       done < <(dt_target_dirs)
@@ -460,7 +460,7 @@ verify_report() {
         [[ -n "$base" ]] || continue
         for f in \
           "$base/Menu/Compress PDF Now.scpt" \
-          "$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+          "$base/Smart Rules/Compress PDF (Smart Rule).scpt"
         do
           [[ -f "$f" ]] && any_exist=1
         done
@@ -471,7 +471,7 @@ verify_report() {
         while IFS= read -r base; do
           [[ -n "$base" ]] || continue
           local menu="$base/Menu/Compress PDF Now.scpt"
-          local rule="$base/Smart Rules/PDF Squeeze (Smart Rule).scpt"
+          local rule="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
           [[ -f "$menu" ]] && echo "  OK      $menu" || true
           [[ -f "$rule" ]] && echo "  OK      $rule" || true
         done < <(dt_target_dirs)
@@ -482,7 +482,7 @@ verify_report() {
   else
     echo "DEVONthink: (not applicable on Linux)"
   fi
-  
+
   echo
   echo "PREFIX: $INSTALL_PREFIX"
   if [[ ":$PATH:" == *":$INSTALL_PREFIX:"* ]]; then
@@ -490,7 +490,7 @@ verify_report() {
   else
     echo "PATH: Add $INSTALL_PREFIX to your PATH in ~/.zprofile or shell rc"
   fi
-  
+
   echo
   echo "Python environment for helper:"
   local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
