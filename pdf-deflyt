@@ -24,7 +24,7 @@ Usage:
   pdf-deflyt [OPTIONS] INPUT...
 
 Examples:
-  pdf-deflyt document.pdf              # Creates document_deflyt.pdf
+  pdf-deflyt document.pdf              # Creates document_compressed.pdf
   pdf-deflyt --inplace *.pdf           # Compress in place (auto-backup)
   pdf-deflyt --recurse ~/Documents     # Batch process folder
   pdf-deflyt --dry-run *.pdf           # Preview savings
@@ -877,7 +877,7 @@ process_one() {
   local orig="$IN"
   local base="${IN%.*}"
   if [[ -z "$OUT_REQ" ]]; then
-    local default_out="${base}_deflyt.pdf"
+    local default_out="${base}_compressed.pdf"
     OUT="$(unique_filename "$default_out")"
   else
     OUT="$OUT_REQ"

@@ -126,15 +126,15 @@ cp "$ASSETS_DIR/gray.pdf" "$BUILD_DIR/filters/B/b.pdf"
 A="$BUILD_DIR/filters/A/a.pdf"
 B="$BUILD_DIR/filters/B/b.pdf"
 
-# Phase 1: default (non-inplace) — expect A/a_deflyt.pdf created, B untouched.
+# Phase 1: default (non-inplace) — expect A/a_compressed.pdf created, B untouched.
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --recurse \
   --include 'A/' --exclude 'B/' "$BUILD_DIR/filters" --jobs 1 >"$logdir/filters_phase1.stdout" 2>&1 || true
 
 # Save a tree snapshot for diagnostics
 ( cd "$BUILD_DIR/filters" && /bin/ls -lR ) > "$BUILD_DIR/filters_tree.txt" 2>/dev/null || true
 
-A_out="$BUILD_DIR/filters/A/a_deflyt.pdf"
-B_out="$BUILD_DIR/filters/B/b_deflyt.pdf"
+A_out="$BUILD_DIR/filters/A/a_compressed.pdf"
+B_out="$BUILD_DIR/filters/B/b_compressed.pdf"
 
 # Assert: output for A exists; output for B must not
 [ -f "$A_out" ] || { echo "Expected $A_out to exist (non-inplace)"; exit 1; }
@@ -173,9 +173,9 @@ fi
 [ "$b1" -eq "$b0" ] || { echo "B size changed but excluded: $b0 -> $b1"; exit 1; }
 [ "$bm1" -eq "$bm0" ] || { echo "B mtime changed but excluded: $bm0 -> $bm1"; exit 1; }
 
-# And no *_deflyt artifacts should exist when --inplace is used
-if find "$BUILD_DIR/filters" -name '*_deflyt.pdf' -print -quit | grep -q . ; then
-  echo "Unexpected *_deflyt.pdf artifacts in inplace mode"
+# And no *_compressed artifacts should exist when --inplace is used
+if find "$BUILD_DIR/filters" -name '*_compressed.pdf' -print -quit | grep -q . ; then
+  echo "Unexpected *_compressed.pdf artifacts in inplace mode"
   exit 1
 fi
 FB
@@ -284,19 +284,19 @@ done
   "$BUILD_DIR/many"/*.pdf \
   >"$BUILD_DIR/logs/jobs_parallel.stdout" 2>&1
 
-# Expect 6 outputs with _deflyt in the same folder
-cnt=$(find "$BUILD_DIR/many" -name '*_deflyt.pdf' | wc -l | tr -d ' ')
+# Expect 6 outputs with _compressed in the same folder
+cnt=$(find "$BUILD_DIR/many" -name '*_compressed.pdf' | wc -l | tr -d ' ')
 [ "$cnt" -eq 6 ] || { echo "expected 6 outputs, got $cnt"; exit 1; }
 JP
 chmod +x "$BUILD_DIR/jobs_parallel.sh"
 # keep cases+=("jobs_parallel::bash \"$BUILD_DIR/jobs_parallel.sh\"")
 
-# (D) default naming rule (_deflyt, same extension)
+# (D) default naming rule (_compressed, same extension)
 cases+=("default_naming_rule::bash -lc '
   in=\"\$BUILD_DIR/defname.pdf\"
   cp \"\$ASSETS_DIR/mixed.pdf\" \"\$in\"
   \"$ROOT/pdf-deflyt\" -p light \"\$in\" >/dev/null
-  [ -f \"\${in%.pdf}_deflyt.pdf\" ]
+  [ -f \"\${in%.pdf}_compressed.pdf\" ]
 '")
 
 # (E) recurse + include/exclude on nested dirs
@@ -314,8 +314,8 @@ mkdir -p "$base/A/AA" "$base/B/BB"
 cp "$ASSETS_DIR/mixed.pdf" "$base/A/AA/a.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$base/B/BB/b.pdf"
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --recurse --include '/A/' --exclude '/B/' "$base" --jobs 1 >/dev/null 2>&1
-[ -f "$base/A/AA/a_deflyt.pdf" ] || { echo "A missing"; exit 1; }
-[ ! -f "$base/B/BB/b_deflyt.pdf" ] || { echo "B should be excluded"; exit 1; }
+[ -f "$base/A/AA/a_compressed.pdf" ] || { echo "A missing"; exit 1; }
+[ ! -f "$base/B/BB/b_compressed.pdf" ] || { echo "B should be excluded"; exit 1; }
 DF
 chmod +x "$BUILD_DIR/depth_filters.sh"
 cases+=("depth_filters::bash \"$BUILD_DIR/depth_filters.sh\"")
@@ -361,8 +361,8 @@ rm -rf "$d"; mkdir -p "$d"
 cp "$ASSETS_DIR/mixed.pdf" "$d/ok.pdf"
 echo "hello" > "$d/note.txt"
 "$ROOT/pdf-deflyt" --recurse "$d" --jobs 1 >/dev/null 2>&1 || true
-[ -f "$d/ok_deflyt.pdf" ] || { echo "pdf not processed"; exit 1; }
-[ ! -f "$d/note_deflyt.pdf" ] || { echo "non-pdf should not be processed"; exit 1; }
+[ -f "$d/ok_compressed.pdf" ] || { echo "pdf not processed"; exit 1; }
+[ ! -f "$d/note_compressed.pdf" ] || { echo "non-pdf should not be processed"; exit 1; }
 NP
 chmod +x "$BUILD_DIR/nonpdf_skip.sh"
 cases+=("nonpdf_skip::bash \"$BUILD_DIR/nonpdf_skip.sh\"")
@@ -385,7 +385,7 @@ qpdf --encrypt test123 test123 256 -- "$in_plain" "$enc"
 
 # --- A) No password: accept EITHER an explicit SKIP or a kept-original pass-through ---
 out_no="$BUILD_DIR/enc_no_pw.pdf"
-rm -f "$out_no" "$BUILD_DIR/enc_no_pw_deflyt.pdf"
+rm -f "$out_no" "$BUILD_DIR/enc_no_pw_compressed.pdf"
 
 msg=$("$ROOT/pdf-deflyt" -p light "$enc" -o "$out_no" 2>&1 || true)
 
@@ -396,10 +396,10 @@ if echo "$msg" | grep -qiE 'SKIP.*(encrypted|password)'; then
 else
   # Case 2: tool didn’t skip; it produced an output but kept original
   echo "$msg" | grep -q 'kept-original'  # must acknowledge pass-through
-  # Output can be exactly -o path OR (depending on tool behavior) a *_deflyt.pdf
+  # Output can be exactly -o path OR (depending on tool behavior) a *_compressed.pdf
   if [ -f "$out_no" ]; then
     : # ok
-  elif [ -f "$BUILD_DIR/enc_no_pw_deflyt.pdf" ]; then
+  elif [ -f "$BUILD_DIR/enc_no_pw_compressed.pdf" ]; then
     : # ok
   else
     echo "Expected an output file in no-password mode" >&2

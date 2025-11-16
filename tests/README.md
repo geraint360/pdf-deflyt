@@ -6,7 +6,7 @@ It builds deterministic fixtures, runs parallelized checks across all presets, a
 ## What’s covered
 
 - Presets: `light`, `standard`, `extreme`, `lossless`
-- Output handling: `-o` (explicit output), default naming (`_deflyt`), paths with spaces
+- Output handling: `-o` (explicit output), default naming (`_compressed`), paths with spaces
 - Estimation: `--dry-run` line appears with size + savings
 - In-place mode: `--inplace` preserves original mtime (within a small tolerance)
 - Filtering: `--include` / `--exclude` (both normal and recursive cases)
@@ -101,7 +101,7 @@ make test-clean            # wipe tests/assets*, tests/build
   Verify `pdf-deflyt` is executable at the repo root (`./pdf-deflyt`) or run `make install-bin` if you use that workflow.
 
 - **Filters test fails**  
-  The suite exercises both default output (`_deflyt.pdf`) and `--inplace` modes; ensure `--include`/`--exclude` patterns are POSIX ERE (like `grep -E`), and that your build hasn’t overridden those flags.
+  The suite exercises both default output (`_compressed.pdf`) and `--inplace` modes; ensure `--include`/`--exclude` patterns are POSIX ERE (like `grep -E`), and that your build hasn’t overridden those flags.
 
 ## CI (optional)
 

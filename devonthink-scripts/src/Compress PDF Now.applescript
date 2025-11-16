@@ -35,12 +35,12 @@ on findTool()
 	-- collect env info with a safe PATH and log it to ~/Library/Logs/pdf-deflyt.log
 	set envPATH to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; printf %s \"$PATH\"'"
 	set whichPdfcpu to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdfcpu || true'"
-	set whichSqueeze to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdf-deflyt || true'"
+	set whichDeflyt to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdf-deflyt || true'"
 	
 	if DEBUG_MODE then
 		my logMsg("DEBUG PATH=" & envPATH)
 		my logMsg("DEBUG which pdfcpu=" & whichPdfcpu)
-		my logMsg("DEBUG which pdf-deflyt=" & whichSqueeze)
+		my logMsg("DEBUG which pdf-deflyt=" & whichDeflyt)
 	end if
 	
 	-- now resolve pdf-deflyt with the same safe PATH
@@ -80,12 +80,12 @@ tell application id "DNtp" -- DEVONthink 4
 				set out to do shell script ("/bin/sh -c " & quoted form of (envPATH & quoted form of toolPath & " --inplace --min-gain 3 --quiet " & quoted form of pth & " 2>&1"))
 				if out is not "" then my logMsg("Output:" & linefeed & out)
 				
-				-- Cleanup: remove any stray sibling “_squeezed.pdf” (when we kept the original)
+				-- Cleanup: remove any stray sibling “_compressed.pdf” (when we kept the original)
 				-- and obvious Ghostscript/temporary artifacts in the same folder.
 				try
-					-- remove sibling “*_squeezed.pdf” if it exists
-					set rmSib to do shell script ("/bin/sh -c " & quoted form of ("p=" & quoted form of pth & "; d=$(dirname \"$p\"); b=$(basename \"$p\" .pdf); f=\"$d/${b}_squeezed.pdf\"; if [ -f \"$f\" ]; then rm -f \"$f\" && echo removed; fi"))
-					if rmSib is "removed" then my logMsg("Cleanup: removed stray _squeezed.pdf")
+					-- remove sibling “*_compressed.pdf” if it exists
+					set rmSib to do shell script ("/bin/sh -c " & quoted form of ("p=" & quoted form of pth & "; d=$(dirname \"$p\"); b=$(basename \"$p\" .pdf); f=\"$d/${b}_compressed.pdf\"; if [ -f \"$f\" ]; then rm -f \"$f\" && echo removed; fi"))
+					if rmSib is "removed" then my logMsg("Cleanup: removed stray _compressed.pdf")
 				on error e
 					my logMsg("Cleanup (sibling) error: " & e)
 				end try
