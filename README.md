@@ -95,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/
 
 **Optional: Install DEVONthink scripts (macOS only)**  
 
-If you want the DEVONthink integration (the Compress PDF Now and PDF Deflyt (Smart Rule) scripts), use:
+If you want the DEVONthink integration (the Compress PDF Now and Compress PDF (Smart Rule) scripts), use:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh \
@@ -448,7 +448,7 @@ make benchmark RUNS=5    # Average over 5 runs
 There are two AppleScripts provided:
 
 1. **Compress PDF Now** — a menu/toolbar action to compress the selected PDFs immediately.
-2. **PDF Deflyt (Smart Rule)** — a handler for DEVONthink Smart Rules to compress PDFs automatically when they meet certain conditions (e.g. added to a group, file size > X).
+2. **Compress PDF (Smart Rule)** — a handler for DEVONthink Smart Rules to compress PDFs automatically when they meet certain conditions (e.g. added to a group, file size > X).
 
 
 By default, both scripts use **pdf-deflyt** with the **standard** compression preset, but this can be changed by editing the AppleScript headers if you prefer a different preset.
@@ -476,11 +476,11 @@ Use the `--prefix` option if you need to override defaults.
 **Compress PDF Now**
 - Select a PDF then run the script from the **Scripts** menu.
 
-**PDF Deflyt (Smart Rule)**
+**Compress PDF (Smart Rule)**
 - Create a **Smart Rule** (_Tools → New Smart Rule…_)
 - Choose your conditions (e.g. Kind is PDF, Size > 300 KB, etc.).
 - Under **Perform the following actions**, select **Apply Script…** and choose
-**PDF Deflyt (Smart Rule)**.
+**Compress PDF (Smart Rule)**.
 - For unattended operation, use `--inplace --min-gain 1` for safety, or customise flags in the AppleScript source.
 
 **Recommended Defaults**
