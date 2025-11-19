@@ -16,7 +16,9 @@ run_case() {
     printf '\n'
   } > "$log"
 
-  if "$@" >> "$log" 2>&1; then
+  local work_dir="${WORK_DIR:-$BUILD_DIR}"
+
+  if ( cd "$work_dir" && "$@" ) >> "$log" 2>&1; then
     green "Case OK: $name"
   else
     red "Case FAILED: $name"

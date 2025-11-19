@@ -2,17 +2,25 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export ROOT
-export TEST_ROOT="$ROOT"
-export BUILD_DIR="$ROOT/tests/build"
-export ASSETS_DIR="$ROOT/tests/assets"
+TEST_ROOT="${PDF_DEFLYT_TEST_ROOT:-$ROOT}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$TEST_ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$TEST_ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+export ROOT TEST_ROOT BUILD_DIR ASSETS_DIR WORK_DIR
+export PDF_DEFLYT_TEST_ROOT="$TEST_ROOT"
+export PDF_DEFLYT_BUILD_DIR="$BUILD_DIR"
+export PDF_DEFLYT_ASSETS_DIR="$ASSETS_DIR"
+export PDF_DEFLYT_WORK_DIR="$WORK_DIR"
 
 # Always start clean unless explicitly skipped
 if [[ "${PDF_DEFLYT_SKIP_CLEAN:-0}" != "1" ]]; then
   rm -rf "$BUILD_DIR" "$ASSETS_DIR"
-  mkdir -p "$BUILD_DIR" "$ASSETS_DIR"
+  mkdir -p "$BUILD_DIR" "$ASSETS_DIR" "$WORK_DIR"
   "$ROOT/tests/fixtures.sh"
 fi
+
+mkdir -p "$WORK_DIR"
 
 # Ensure deps for tests
 need() { command -v "$1" > /dev/null 2>&1 || {
@@ -37,7 +45,7 @@ cases_serial=()
 
 # 1) -o honored + basic compression for each preset
 for pre in light standard extreme lossless; do
-  out="$BUILD_DIR/out-${pre}.pdf"
+  out="$WORK_DIR/out-${pre}.pdf"
   cases+=("o_${pre}::$ROOT/pdf-deflyt -p $pre \"$ASSETS_DIR/mixed.pdf\" -o \"$out\" && \
            [[ -f \"$out\" ]] && echo ok")
 done
@@ -47,18 +55,19 @@ cat > "$BUILD_DIR/strength_order_body.sh" << 'SB'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-ok() { [ -f "$BUILD_DIR/out-standard.pdf" ] && [ -f "$BUILD_DIR/out-light.pdf" ] && [ -f "$BUILD_DIR/out-extreme.pdf" ]; }
+ok() { [ -f "$WORK_DIR/out-standard.pdf" ] && [ -f "$WORK_DIR/out-light.pdf" ] && [ -f "$WORK_DIR/out-extreme.pdf" ]; }
 for i in {1..60}; do ok && break; sleep 0.5; done
 ok || { echo "outputs missing"; ls -al "$BUILD_DIR"; exit 2; }
 
 s() { stat -f%z "$1" 2>/dev/null || echo 0; }
-bs=$(s "$BUILD_DIR/out-standard.pdf")
-bl=$(s "$BUILD_DIR/out-light.pdf")
-be=$(s "$BUILD_DIR/out-extreme.pdf")
+bs=$(s "$WORK_DIR/out-standard.pdf")
+bl=$(s "$WORK_DIR/out-light.pdf")
+be=$(s "$WORK_DIR/out-extreme.pdf")
 [ "$bs" -gt 0 ] && [ "$bl" -gt 0 ] && [ "$be" -gt 0 ] || { echo "size read failed"; exit 2; }
 
 # Assert extreme <= standard <= light (5% tolerance)
@@ -78,7 +87,7 @@ cases+=("dry_run::$ROOT/pdf-deflyt --dry-run -p standard \"$ASSETS_DIR/mixed.pdf
 # 5) --min-gain skip keeps original when savings < threshold
 cases+=("min_gain_skip::bash -lc '
   in=\"\$ASSETS_DIR/structural.pdf\"
-  out=\"\$BUILD_DIR/mgain.pdf\"
+  out=\"\$WORK_DIR/mgain.pdf\"
   msg=\$(\"\$ROOT/pdf-deflyt\" -p lossless --min-gain 50 \"\$in\" -o \"\$out\" 2>&1 || true)
   a=\$(stat -f%z \"\$in\")
   b=\$(stat -f%z \"\$out\" 2>/dev/null || echo 0)
@@ -94,8 +103,8 @@ cases+=("min_gain_skip::bash -lc '
 # 6) --skip-if-smaller SIZE prevents processing tiny files
 cases+=("skip_if_smaller::bash -lc '
   tiny=\"\$ASSETS_DIR/structural.pdf\"
-  rm -f \"\$BUILD_DIR/skip.pdf\"
-  out=\"\$BUILD_DIR/skip.pdf\"
+  rm -f \"\$WORK_DIR/skip.pdf\"
+  out=\"\$WORK_DIR/skip.pdf\"
   msg=\$(\"\$ROOT/pdf-deflyt\" --skip-if-smaller 5MB \"\$tiny\" -o \"\$out\" 2>&1 || true)
   if ! echo \"\$msg\" | grep -q \"SKIP (too small\"; then
     msg=\$(\"\$ROOT/pdf-deflyt\" --skip-if-smaller 5m \"\$tiny\" -o \"\$out\" 2>&1 || true)
@@ -108,9 +117,10 @@ cat > "$BUILD_DIR/filters_body.sh" << 'FB'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 logdir="$BUILD_DIR/logs"
 mkdir -p "$logdir"
@@ -118,23 +128,23 @@ mkdir -p "$logdir"
 echo "pdf-deflyt: $("$ROOT/pdf-deflyt" --version 2>/dev/null || echo unknown)" >&2
 
 # Fresh fixture dirs
-rm -rf "$BUILD_DIR/filters"
-mkdir -p "$BUILD_DIR/filters/A" "$BUILD_DIR/filters/B"
-cp "$ASSETS_DIR/rgb.pdf"  "$BUILD_DIR/filters/A/a.pdf"
-cp "$ASSETS_DIR/gray.pdf" "$BUILD_DIR/filters/B/b.pdf"
+rm -rf "$WORK_DIR/filters"
+mkdir -p "$WORK_DIR/filters/A" "$WORK_DIR/filters/B"
+cp "$ASSETS_DIR/rgb.pdf"  "$WORK_DIR/filters/A/a.pdf"
+cp "$ASSETS_DIR/gray.pdf" "$WORK_DIR/filters/B/b.pdf"
 
-A="$BUILD_DIR/filters/A/a.pdf"
-B="$BUILD_DIR/filters/B/b.pdf"
+A="$WORK_DIR/filters/A/a.pdf"
+B="$WORK_DIR/filters/B/b.pdf"
 
 # Phase 1: default (non-inplace) — expect A/a_compressed.pdf created, B untouched.
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --recurse \
-  --include 'A/' --exclude 'B/' "$BUILD_DIR/filters" --jobs 1 >"$logdir/filters_phase1.stdout" 2>&1 || true
+  --include 'A/' --exclude 'B/' "$WORK_DIR/filters" --jobs 1 >"$logdir/filters_phase1.stdout" 2>&1 || true
 
 # Save a tree snapshot for diagnostics
-( cd "$BUILD_DIR/filters" && /bin/ls -lR ) > "$BUILD_DIR/filters_tree.txt" 2>/dev/null || true
+( cd "$WORK_DIR/filters" && /bin/ls -lR ) > "$WORK_DIR/filters_tree.txt" 2>/dev/null || true
 
-A_out="$BUILD_DIR/filters/A/a_compressed.pdf"
-B_out="$BUILD_DIR/filters/B/b_compressed.pdf"
+A_out="$WORK_DIR/filters/A/a_compressed.pdf"
+B_out="$WORK_DIR/filters/B/b_compressed.pdf"
 
 # Assert: output for A exists; output for B must not
 [ -f "$A_out" ] || { echo "Expected $A_out to exist (non-inplace)"; exit 1; }
@@ -142,20 +152,20 @@ B_out="$BUILD_DIR/filters/B/b_compressed.pdf"
 
 # Phase 2: inplace — now ensure A is *touched* and B is not.
 # Reset to clean inputs
-rm -rf "$BUILD_DIR/filters"
-mkdir -p "$BUILD_DIR/filters/A" "$BUILD_DIR/filters/B"
-cp "$ASSETS_DIR/rgb.pdf"  "$BUILD_DIR/filters/A/a.pdf"
-cp "$ASSETS_DIR/gray.pdf" "$BUILD_DIR/filters/B/b.pdf"
+rm -rf "$WORK_DIR/filters"
+mkdir -p "$WORK_DIR/filters/A" "$WORK_DIR/filters/B"
+cp "$ASSETS_DIR/rgb.pdf"  "$WORK_DIR/filters/A/a.pdf"
+cp "$ASSETS_DIR/gray.pdf" "$WORK_DIR/filters/B/b.pdf"
 
-A="$BUILD_DIR/filters/A/a.pdf"
-B="$BUILD_DIR/filters/B/b.pdf"
+A="$WORK_DIR/filters/A/a.pdf"
+B="$WORK_DIR/filters/B/b.pdf"
 
 a0=$(stat -f%z "$A"); am0=$(stat -f%m "$A")
 b0=$(stat -f%z "$B"); bm0=$(stat -f%m "$B")
 
 # Run inplace. We keep --min-gain 0 to strongly encourage rewriting, but tolerate engines that skip if larger.
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --inplace --recurse \
-  --include 'A/' --exclude 'B/' "$BUILD_DIR/filters" --jobs 1 >"$logdir/filters_phase2.stdout" 2>&1 || true
+  --include 'A/' --exclude 'B/' "$WORK_DIR/filters" --jobs 1 >"$logdir/filters_phase2.stdout" 2>&1 || true
 
 a1=$(stat -f%z "$A"); am1=$(stat -f%m "$A")
 b1=$(stat -f%z "$B"); bm1=$(stat -f%m "$B")
@@ -174,7 +184,7 @@ fi
 [ "$bm1" -eq "$bm0" ] || { echo "B mtime changed but excluded: $bm0 -> $bm1"; exit 1; }
 
 # And no *_compressed artifacts should exist when --inplace is used
-if find "$BUILD_DIR/filters" -name '*_compressed.pdf' -print -quit | grep -q . ; then
+if find "$WORK_DIR/filters" -name '*_compressed.pdf' -print -quit | grep -q . ; then
   echo "Unexpected *_compressed.pdf artifacts in inplace mode"
   exit 1
 fi
@@ -189,12 +199,13 @@ cat > "$BUILD_DIR/inplace_body.sh" << 'IB'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 set +e
-tmp="$BUILD_DIR/ip.pdf"
+tmp="$WORK_DIR/ip.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$tmp"
 mt0=$(stat -f %m "$tmp") || mt0=0
 sz0=$(stat -f %z "$tmp") || sz0=0
@@ -228,13 +239,14 @@ cat > "$BUILD_DIR/space_paths.sh" << 'SP'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-in="$BUILD_DIR/Input With Spaces.pdf"
+in="$WORK_DIR/Input With Spaces.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$in"
-out="$BUILD_DIR/Output With Spaces.pdf"
+out="$WORK_DIR/Output With Spaces.pdf"
 "$ROOT/pdf-deflyt" -p light "$in" -o "$out" >/dev/null
 [ -f "$out" ] || { echo "missing output with spaces"; exit 1; }
 SP
@@ -246,11 +258,12 @@ cat > "$BUILD_DIR/quiet_body.sh" << 'QB'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-out="$BUILD_DIR/q.pdf"
+out="$WORK_DIR/q.pdf"
 msg=$("$ROOT/pdf-deflyt" -p light "$ASSETS_DIR/mixed.pdf" -o "$out" --quiet 2>&1 || true)
 [ -f "$out" ] && ! echo "${msg:-}" | grep -q '^→ '
 QB
@@ -262,30 +275,31 @@ cat > "$BUILD_DIR/jobs_parallel.sh" << 'JP'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 # Fixture
-rm -rf "$BUILD_DIR/many"
-mkdir -p "$BUILD_DIR/many"
+rm -rf "$WORK_DIR/many"
+mkdir -p "$WORK_DIR/many"
 for i in $(seq 1 6); do
-  cp "$ASSETS_DIR/mixed.pdf" "$BUILD_DIR/many/in_$i.pdf"
+  cp "$ASSETS_DIR/mixed.pdf" "$WORK_DIR/many/in_$i.pdf"
 done
 
 # Preflight: prove readability to catch any odd environment/permission issue
-for f in "$BUILD_DIR/many"/*.pdf; do
+for f in "$WORK_DIR/many"/*.pdf; do
   [ -r "$f" ] || { echo "NOT READABLE: $f"; ls -l "$f" || true; exit 1; }
 done
 
 # Invoke with explicit file list so bash expands the glob here.
 # This avoids whatever recursion check in pdf-deflyt is flagging the files as unreadable.
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --jobs 4 \
-  "$BUILD_DIR/many"/*.pdf \
+  "$WORK_DIR/many"/*.pdf \
   >"$BUILD_DIR/logs/jobs_parallel.stdout" 2>&1
 
 # Expect 6 outputs with _compressed in the same folder
-cnt=$(find "$BUILD_DIR/many" -name '*_compressed.pdf' | wc -l | tr -d ' ')
+cnt=$(find "$WORK_DIR/many" -name '*_compressed.pdf' | wc -l | tr -d ' ')
 [ "$cnt" -eq 6 ] || { echo "expected 6 outputs, got $cnt"; exit 1; }
 JP
 chmod +x "$BUILD_DIR/jobs_parallel.sh"
@@ -293,7 +307,7 @@ chmod +x "$BUILD_DIR/jobs_parallel.sh"
 
 # (D) default naming rule (_compressed, same extension)
 cases+=("default_naming_rule::bash -lc '
-  in=\"\$BUILD_DIR/defname.pdf\"
+  in=\"\$WORK_DIR/defname.pdf\"
   cp \"\$ASSETS_DIR/mixed.pdf\" \"\$in\"
   \"$ROOT/pdf-deflyt\" -p light \"\$in\" >/dev/null
   [ -f \"\${in%.pdf}_compressed.pdf\" ]
@@ -304,11 +318,12 @@ cat > "$BUILD_DIR/depth_filters.sh" << 'DF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-base="$BUILD_DIR/deep"
+base="$WORK_DIR/deep"
 rm -rf "$base"
 mkdir -p "$base/A/AA" "$base/B/BB"
 cp "$ASSETS_DIR/mixed.pdf" "$base/A/AA/a.pdf"
@@ -325,12 +340,13 @@ cat > "$BUILD_DIR/min_gain_tiny.sh" << 'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 in="$ASSETS_DIR/structural.pdf"
-out="$BUILD_DIR/tiny.pdf"
+out="$WORK_DIR/tiny.pdf"
 msg=$("$ROOT/pdf-deflyt" -p standard --min-gain 50 "$in" -o "$out" 2>&1 || true)
 # Either we saw "kept-original", or the output size equals input (or out absent -> 0).
 if echo "$msg" | grep -q "kept-original"; then
@@ -352,11 +368,12 @@ cat > "$BUILD_DIR/nonpdf_skip.sh" << 'NP'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-d="$BUILD_DIR/mixed_tree"
+d="$WORK_DIR/mixed_tree"
 rm -rf "$d"; mkdir -p "$d"
 cp "$ASSETS_DIR/mixed.pdf" "$d/ok.pdf"
 echo "hello" > "$d/note.txt"
@@ -372,20 +389,21 @@ cat >"$BUILD_DIR/encrypted_body.sh" <<'ENCRYPT'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 # Inputs
 in_plain="$ASSETS_DIR/gray.pdf"
-enc="$BUILD_DIR/enc.pdf"
+enc="$WORK_DIR/enc.pdf"
 
 # Make an AES-256 encrypted PDF (qpdf refuses weak crypto by default)
 qpdf --encrypt test123 test123 256 -- "$in_plain" "$enc"
 
 # --- A) No password: accept EITHER an explicit SKIP or a kept-original pass-through ---
-out_no="$BUILD_DIR/enc_no_pw.pdf"
-rm -f "$out_no" "$BUILD_DIR/enc_no_pw_compressed.pdf"
+out_no="$WORK_DIR/enc_no_pw.pdf"
+rm -f "$out_no" "$WORK_DIR/enc_no_pw_compressed.pdf"
 
 msg=$("$ROOT/pdf-deflyt" -p light "$enc" -o "$out_no" 2>&1 || true)
 
@@ -399,7 +417,7 @@ else
   # Output can be exactly -o path OR (depending on tool behavior) a *_compressed.pdf
   if [ -f "$out_no" ]; then
     : # ok
-  elif [ -f "$BUILD_DIR/enc_no_pw_compressed.pdf" ]; then
+  elif [ -f "$WORK_DIR/enc_no_pw_compressed.pdf" ]; then
     : # ok
   else
     echo "Expected an output file in no-password mode" >&2
@@ -408,7 +426,7 @@ else
 fi
 
 # --- B) With password: must succeed and write an output file ---
-out_yes="$BUILD_DIR/enc_with_pw.pdf"
+out_yes="$WORK_DIR/enc_with_pw.pdf"
 rm -f "$out_yes"
 "$ROOT/pdf-deflyt" -p light --password test123 "$enc" -o "$out_yes" >/dev/null
 [ -f "$out_yes" ] || { echo "Missing output with password"; exit 1; }
@@ -423,14 +441,15 @@ if [[ "${SKIP_IMAGEMAGICK_TESTS:-0}" != "1" ]] && command -v magick >/dev/null 2
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 # Create a simple test PDF with an embedded image that has an ICC profile
 # We'll use an existing PDF and process it to simulate ICC profile handling
 in="$ASSETS_DIR/rgb.pdf"
-out="$BUILD_DIR/icc_test.pdf"
+out="$WORK_DIR/icc_test.pdf"
 
 # Process with standard preset which should trigger ICC detection if present
 msg=$("$ROOT/pdf-deflyt" -p standard "$in" -o "$out" 2>&1 || true)
@@ -461,16 +480,17 @@ cat >"$BUILD_DIR/posthook_body.sh" <<'POSTHOOK'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 # Create a hook script that writes to a marker file
-hook_marker="$BUILD_DIR/hook_ran.txt"
+hook_marker="$WORK_DIR/hook_ran.txt"
 rm -f "$hook_marker"
 
 in="$ASSETS_DIR/mixed.pdf"
-out="$BUILD_DIR/hook_test.pdf"
+out="$WORK_DIR/hook_test.pdf"
 
 # Run with post-hook that creates marker file
 "$ROOT/pdf-deflyt" -p light "$in" -o "$out" \
@@ -493,12 +513,13 @@ cat >"$BUILD_DIR/sidecar_body.sh" <<'SIDECAR'
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 in="$ASSETS_DIR/gray.pdf"
-out="$BUILD_DIR/sidecar_test.pdf"
+out="$WORK_DIR/sidecar_test.pdf"
 rm -f "$out" "$out.pre.sha256" "$out.post.sha256"
 
 # Run with sidecar enabled
@@ -528,18 +549,19 @@ if "$ROOT/pdf-deflyt" --help 2>&1 | grep -q -- '--log'; then
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
-d="$BUILD_DIR/csv_many"
+d="$WORK_DIR/csv_many"
 rm -rf "$d"; mkdir -p "$d"
 
 cp "$ASSETS_DIR/gray.pdf" "$d/in_1.pdf"
 cp "$ASSETS_DIR/gray.pdf" "$d/in_2.pdf"
 cp "$ASSETS_DIR/mono.pdf" "$d/in_3.pdf"
 
-csv="$BUILD_DIR/report.csv"
+csv="$WORK_DIR/report.csv"
 rm -f "$csv"
 
 "$ROOT/pdf-deflyt" -p light --log "$csv" "$d" --jobs 1 >/dev/null 2>&1 || true
@@ -560,16 +582,17 @@ CSV
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$ROOT/tests/assets}"
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 
 # Test with file containing spaces in path
-d="$BUILD_DIR/csv edge"
+d="$WORK_DIR/csv edge"
 rm -rf "$d"; mkdir -p "$d"
 cp "$ASSETS_DIR/gray.pdf" "$d/file with spaces.pdf"
 
-csv="$BUILD_DIR/report_edge.csv"
+csv="$WORK_DIR/report_edge.csv"
 rm -f "$csv"
 
 "$ROOT/pdf-deflyt" -p standard --log "$csv" "$d" --jobs 1 >/dev/null 2>&1 || true
@@ -619,7 +642,7 @@ echo "Running ${#cases[@]} tests…"
 if command -v parallel > /dev/null 2>&1; then
   # Use NUL-delimited input to avoid any quoting issues.
   printf '%s\0' "${cases[@]}" \
-    | parallel --no-notice -0 -j "$(sysctl -n hw.ncpu 2> /dev/null || echo 4)" run_one {}
+    | SHELL=/bin/bash PARALLEL='--will-cite' parallel --no-notice -0 -j "$(sysctl -n hw.ncpu 2> /dev/null || echo 4)" run_one {}
 else
   # Deterministic sequential fallback (no DIY background job juggling)
   for c in "${cases[@]}"; do

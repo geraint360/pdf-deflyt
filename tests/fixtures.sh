@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Where to stage generated files
-TEST_ROOT="${TEST_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-BUILD_DIR="${BUILD_DIR:-$TEST_ROOT/tests/build}"
-ASSETS_DIR="${ASSETS_DIR:-$TEST_ROOT/tests/assets}"
+TEST_ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$TEST_ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$TEST_ROOT/tests/assets}"
 
 mkdir -p "$BUILD_DIR" "$ASSETS_DIR"
 

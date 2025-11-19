@@ -118,10 +118,16 @@ test-clean: clean
 # Run the full test suite from a clean slate
 test: test-clean
 	@echo "🔄 Rebuilding fixtures..."
-	@tests/fixtures.sh
+	@PDF_DEFLYT_TEST_ROOT="$(CURDIR)" \
+	  PDF_DEFLYT_BUILD_DIR="$(CURDIR)/tests/build" \
+	  PDF_DEFLYT_ASSETS_DIR="$(CURDIR)/tests/assets" \
+	  tests/fixtures.sh
 	@echo "✅ Fixtures ready."
 	@echo "🚀 Running full test suite..."
-	@tests/run.sh
+	@PDF_DEFLYT_TEST_ROOT="$(CURDIR)" \
+	  PDF_DEFLYT_BUILD_DIR="$(CURDIR)/tests/build" \
+	  PDF_DEFLYT_ASSETS_DIR="$(CURDIR)/tests/assets" \
+	  tests/run.sh
 	
 smoke-clean:
 	@rm -rf "$(SMOKE_DIR)"
