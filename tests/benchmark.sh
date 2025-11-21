@@ -8,7 +8,7 @@ export BUILD_DIR="$ROOT/tests/build-bench"
 export ASSETS_DIR="$ROOT/tests/assets-bench"
 
 # Configuration
-RUNS=${PDF_DEFLYT_BENCH_RUNS:-3}  # Number of runs per test
+RUNS=${PDF_DEFLYT_BENCH_RUNS:-3} # Number of runs per test
 VERBOSE=${PDF_DEFLYT_BENCH_VERBOSE:-0}
 
 # Colors
@@ -30,12 +30,12 @@ setup_bench() {
   # Create test fixtures if not already present
   if [[ ! -f "$ROOT/tests/assets/mixed.pdf" ]]; then
     log "Creating test fixtures..."
-    "$ROOT/tests/fixtures.sh" >/dev/null 2>&1 || true
+    "$ROOT/tests/fixtures.sh" > /dev/null 2>&1 || true
   fi
 
   # Copy test fixtures to benchmark assets
   if [[ -d "$ROOT/tests/assets" ]]; then
-    cp -r "$ROOT/tests/assets"/* "$ASSETS_DIR/" 2>/dev/null || true
+    cp -r "$ROOT/tests/assets"/* "$ASSETS_DIR/" 2> /dev/null || true
   fi
 
   success "Benchmark environment ready"
@@ -43,7 +43,7 @@ setup_bench() {
 
 # Get file size in bytes
 size_of() {
-  stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+  stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0
 }
 
 # Format bytes to human readable
@@ -72,23 +72,23 @@ bench_one() {
   for i in $(seq 1 "$RUNS"); do
     rm -f "$output"
 
-    local start=$(date +%s%N 2>/dev/null || date +%s)
+    local start=$(date +%s%N 2> /dev/null || date +%s)
 
     if [[ "$VERBOSE" == "1" ]]; then
       "$ROOT/pdf-deflyt" -p "$preset" "$input" -o "$output" 2>&1
     else
-      "$ROOT/pdf-deflyt" -p "$preset" "$input" -o "$output" >/dev/null 2>&1
+      "$ROOT/pdf-deflyt" -p "$preset" "$input" -o "$output" > /dev/null 2>&1
     fi
 
-    local end=$(date +%s%N 2>/dev/null || date +%s)
+    local end=$(date +%s%N 2> /dev/null || date +%s)
 
     # Calculate elapsed time in milliseconds
-    if date +%s%N >/dev/null 2>&1; then
+    if date +%s%N > /dev/null 2>&1; then
       # nanosecond precision available
-      local elapsed=$(( (end - start) / 1000000 ))
+      local elapsed=$(((end - start) / 1000000))
     else
       # second precision only
-      local elapsed=$(( (end - start) * 1000 ))
+      local elapsed=$(((end - start) * 1000))
     fi
 
     total_time=$((total_time + elapsed))
@@ -201,7 +201,7 @@ main() {
 
 # Help
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: $0 [OPTIONS]
 
 Run performance benchmarks for pdf-deflyt
@@ -227,10 +227,19 @@ EOF
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help) usage ;;
-    -v|--verbose) VERBOSE=1; shift ;;
-    -r|--runs) RUNS="${2:-3}"; shift 2 ;;
-    *) echo "Unknown option: $1" >&2; usage ;;
+    -h | --help) usage ;;
+    -v | --verbose)
+      VERBOSE=1
+      shift
+      ;;
+    -r | --runs)
+      RUNS="${2:-3}"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      ;;
   esac
 done
 

@@ -10,7 +10,7 @@ It builds deterministic fixtures, runs parallelized checks across all presets, a
 - Estimation: `--dry-run` line appears with size + savings
 - In-place mode: `--inplace` preserves original mtime (within a small tolerance)
 - Filtering: `--include` / `--exclude` (both normal and recursive cases)
-- Guard rails: `--skip-if-smaller`, `--min-gain`
+- Guard rails: `--min-gain`
 - Parallelism: `--jobs` processes multiple files concurrently
 - Quiet mode: `--quiet` suppresses the summary line
 - Non-PDF inputs: are skipped without crashing

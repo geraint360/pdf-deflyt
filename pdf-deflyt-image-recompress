@@ -7,8 +7,9 @@ DEPENDENCIES:
   System: ImageMagick (brew install imagemagick)
   Python: PyMuPDF (auto-installed in local venv on first run)
 
-The script automatically creates a local virtual environment (.pdf-deflyt-venv)
-and installs PyMuPDF on first run. No manual pip installation required.
+The script automatically creates a virtual environment (next to the helper when
+possible, otherwise under ~/.cache/pdf-deflyt/venv) and installs PyMuPDF on
+first run. No manual pip installation required.
 
 USAGE:
   pdf-deflyt-image-recompress [-v] [-q QUALITY] INPUT OUTPUT
@@ -29,7 +30,22 @@ def check_imagemagick():
 
 # Virtual environment setup for PyMuPDF only
 SCRIPT_DIR = Path(__file__).parent.resolve()
-VENV_DIR = SCRIPT_DIR / ".pdf-deflyt-venv"
+
+def _resolve_venv_dir():
+    """Return a writable path for the helper virtual environment."""
+    candidate = SCRIPT_DIR / ".pdf-deflyt-venv"
+    if candidate.exists() or os.access(SCRIPT_DIR, os.W_OK):
+        return candidate
+
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    fallback_root = cache_home / "pdf-deflyt"
+    try:
+        fallback_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return candidate
+    return fallback_root / "venv"
+
+VENV_DIR = _resolve_venv_dir()
 VENV_PYTHON = VENV_DIR / "bin" / "python3"
 
 def setup_venv():

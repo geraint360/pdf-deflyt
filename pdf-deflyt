@@ -4,7 +4,7 @@ set -o pipefail
 
 # pdf-deflyt v2.3.0-zsh
 # - Auto-tuned compression via image PPI analysis
-# - Presets: light, standard, extreme, lossless, archive
+# - Presets: light, standard, extreme, lossless
 # - Batch + recurse + parallel processing
 # - Special handling for ICC profile images via ImageMagick
 # - Metadata & timestamps preserved by default
@@ -30,10 +30,11 @@ Examples:
   pdf-deflyt --dry-run *.pdf           # Preview savings
 
 Presets:
+  -p light      Higher quality, larger files (≈300dpi, JPEG Q78)
   -p standard   (default) Auto-tuned per-PDF based on content analysis
-  -p light      Higher quality, larger files (300dpi, Q78)
-  -p extreme    Maximum compression, smaller files (144dpi, Q68)
+  -p extreme    Maximum compression, smaller files (≈144dpi, JPEG Q68)
   -p lossless   Structure-only, no image recompression (ultra-safe)
+  (Helpers: `pdf-deflyt-image-recompress` auto-installs PyMuPDF in a user-writable cache if needed.)
 
 Common Options:
   --inplace            Replace originals (creates automatic .bak backup)
@@ -43,7 +44,6 @@ Common Options:
 
 Control:
   --min-gain PCT       Skip files with < PCT savings (default: 1)
-  --skip-small SIZE    Skip files smaller than SIZE (e.g., 500K, 1MB)
   --jobs N             Parallel workers (default: auto-detect cores)
   --backup             Create .bak files with --inplace (default: enabled)
 
@@ -74,7 +74,6 @@ Filtering (regex on full path):
 
 Validation & Recovery:
   --validate               Validate PDFs after compression
-  --resume STATE           Resume interrupted batch job
   --check-deps             Verify all dependencies are installed
 
 Automation & Logging:
@@ -135,7 +134,6 @@ OUT_SINGLE=""
 INPLACE=false
 BACKUP=false
 VALIDATE=false
-RESUME_STATE=""
 
 # Processing mode
 RECURSE=false
@@ -152,7 +150,6 @@ USE_COLOR=auto  # auto, always, never
 
 # File filtering
 MIN_GAIN=1
-SKIP_UNDER_BYTES=""
 
 # Resource management
 MEMORY_LIMIT=""
@@ -189,14 +186,12 @@ while [[ $# -gt 0 ]]; do
     --inplace) INPLACE=true; shift ;;
     --backup) BACKUP=true; shift ;;
     --validate) VALIDATE=true; shift ;;
-    --resume) RESUME_STATE="${2:-}"; shift 2 ;;
     --dry-run) DRYRUN=true; shift ;;
     --debug) DEBUG=true; VERBOSE=2; shift ;;
     --verbose) VERBOSE=1; shift ;;
     --color) USE_COLOR="${2:-auto}"; shift 2 ;;
     --log) LOGFILE="${2:-}"; shift 2 ;;
     --min-gain) MIN_GAIN="${2:-1}"; shift 2 ;;
-    --skip-if-smaller) SKIP_UNDER_BYTES="${2:-}"; shift 2 ;;
     --memory-limit) MEMORY_LIMIT="${2:-}"; shift 2 ;;
     --password) PASSWORD="${2:-}"; shift 2 ;;
     --password-file) PASSWORD_FILE="${2:-}"; shift 2 ;;
@@ -216,7 +211,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ ${#ARGS[@]} -ge 1 || $INTERNAL_ONE = true || $CHECK_DEPS = true || -n "$RESUME_STATE" ]] || usage
+[[ ${#ARGS[@]} -ge 1 || $INTERNAL_ONE = true || $CHECK_DEPS = true ]] || usage
 if [[ -n "$OUT_SINGLE" && ${#ARGS[@]} -ne 1 && $INTERNAL_ONE = false ]]; then
   echo "ERROR: -o option requires exactly one input file (got ${#ARGS[@]})" >&2
   exit 2
@@ -507,6 +502,28 @@ if ! $INTERNAL_ONE; then
 fi
 
 restore_times() { touch -r "$1" "$2" 2>/dev/null || true; }
+
+is_pdf_encrypted() {
+  local file="$1" info
+  if info=$(pdfinfo "$file" 2>/dev/null); then
+    if print -r -- "$info" | command grep -qi '^Encrypted:[[:space:]]*yes'; then
+      return 0
+    fi
+    return 1
+  fi
+
+  info=$(qpdf --show-encryption "$file" 2>&1 || true)
+  if print -r -- "$info" | command grep -qi 'not encrypted'; then
+    return 1
+  fi
+  if print -r -- "$info" | command grep -qi 'R[[:space:]]*='; then
+    return 0
+  fi
+  if print -r -- "$info" | command grep -qi 'encrypted'; then
+    return 0
+  fi
+  return 1
+}
 
 unique_filename() {
   local base="$1"
@@ -859,8 +876,6 @@ estimate_savings() {
   printf '%.1f %.1f\n' "$low" "$high"
 }
 
-SKIP_UNDER_RESOLVED=""; [[ -n "$SKIP_UNDER_BYTES" ]] && SKIP_UNDER_RESOLVED="$(parse_bytes "$SKIP_UNDER_BYTES")"
-
 process_one() {
   emulate -L zsh
   unsetopt nounset
@@ -910,7 +925,7 @@ process_one() {
     fi
   else
     # No password supplied: if the file is encrypted, SKIP cleanly
-    if pdfinfo "$IN" 2>/dev/null | command egrep -qi '^Encrypted:\s*yes'; then
+    if is_pdf_encrypted "$IN"; then
       log "SKIP: ${orig:-$IN} (encrypted - use --password or --password-file to process)"
       # For the test, and for CLI UX, a clean skip should not be treated as an error
       return 0
@@ -1082,12 +1097,6 @@ process_one() {
     if ! pdfcpu optimize -quiet "$tmp2" "$tmp3" >/dev/null 2>&1; then
       [[ -s "$tmp2" ]] && cp "$tmp2" "$tmp3" || cp "$tmp1" "$tmp3"
     fi
-    if $LINEARIZE; then
-      if ! qpdf --linearize "$tmp3" "${tmp3}.w" >/dev/null 2>&1 || ! mv "${tmp3}.w" "$tmp3" 2>/dev/null; then
-        $DEBUG && log "WARNING: QPDF linearization failed, continuing without linearization"
-        rm -f "${tmp3}.w" 2>/dev/null || true
-      fi
-    fi
     if ! mutool clean -z "$tmp3" "${tmp3}.c" >/dev/null 2>&1 || ! mv "${tmp3}.c" "$tmp3" 2>/dev/null; then
       $DEBUG && log "WARNING: MuPDF clean failed, continuing without additional cleaning"
       rm -f "${tmp3}.c" 2>/dev/null || true
@@ -1178,15 +1187,6 @@ run_wrapper() {
     return 0
   fi
 
-  if [[ -n "${SKIP_UNDER_RESOLVED:-}" ]]; then
-    local sz=$(size_of "$f")
-    if [[ -n "$sz" && "$sz" -lt "$SKIP_UNDER_RESOLVED" ]]; then
-      log "SKIP (too small): $f"
-      ! $INTERNAL_ONE && ((STATS_TOTAL++)) && ((STATS_SKIPPED++))
-      return 0
-    fi
-  fi
-
   if [[ "${DRYRUN:-false}" == true ]]; then
     local tmpdir="${TMPDIR:-/tmp}"
     tmpdir="${tmpdir%/}"
@@ -1202,9 +1202,7 @@ run_wrapper() {
     case "$PRESET" in
       light)       C_RES=300; G_RES=300; M_RES=1200; JPEGQ=78 ;;
       extreme)     C_RES=144; G_RES=144; M_RES=600;  JPEGQ=68 ;;
-      archive)     C_RES=240; G_RES=240; M_RES=900;  JPEGQ=74 ;;
       lossless)    C_RES=0;   G_RES=0;   M_RES=0;    JPEGQ=74 ;;
-      aggressive)  C_RES=0;   G_RES=0;   M_RES=0;    JPEGQ=75 ;;
       standard)
         if (( C_CNT > 0 )); then
           local target=$(( ${C_MED%.*} >= 380 ? 220 : 200 ))
@@ -1269,7 +1267,6 @@ if (( JOBS > 1 )) && $PARALLEL_OK; then
       KEEP_METADATA="$KEEP_METADATA" KEEP_DATE="$KEEP_DATE" MIN_GAIN="$MIN_GAIN" \
       DETERMINISTIC="$DETERMINISTIC" PASSWORD="$PASSWORD" POST_HOOK="$POST_HOOK" \
       SIDECAR="$SIDECAR" DRYRUN="$DRYRUN" DEBUG="$DEBUG" \
-      SKIP_UNDER_BYTES="$SKIP_UNDER_BYTES" SKIP_UNDER_RESOLVED="$SKIP_UNDER_RESOLVED" \
       MEMORY_LIMIT_BYTES="$MEMORY_LIMIT_BYTES" \
       LOGFILE="$LOGFILE" QUIET="$QUIET" \
   command parallel -j "$JOBS" --no-notice --will-cite -- \
@@ -1282,7 +1279,7 @@ elif (( JOBS > 1 )) && command -v xargs >/dev/null 2>&1 && echo test | xargs -P 
   # Export variables for child processes
   export PRESET JPEGQ_OVERRIDE INPLACE KEEP_METADATA KEEP_DATE MIN_GAIN \
          DETERMINISTIC PASSWORD POST_HOOK SIDECAR DRYRUN DEBUG \
-         SKIP_UNDER_BYTES SKIP_UNDER_RESOLVED MEMORY_LIMIT_BYTES LOGFILE QUIET
+         MEMORY_LIMIT_BYTES LOGFILE QUIET
 
   # Use xargs -P for parallel processing
   printf '%s\0' "${FILES[@]}" | \

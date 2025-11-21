@@ -12,7 +12,7 @@ set -euo pipefail
 # curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh | bash
 #
 REPO_RAW="https://raw.githubusercontent.com/geraint360/pdf-deflyt/main"
-PDFCPU_VERSION="0.11.0"   # linux fallback download if no package is available
+PDFCPU_VERSION="0.11.0" # linux fallback download if no package is available
 
 PREFIX_DEFAULT="$HOME/bin"
 INSTALL_PREFIX="$PREFIX_DEFAULT"
@@ -20,15 +20,17 @@ INSTALL_PARALLEL=1
 INSTALL_IMAGEMAGICK=1
 VERIFY_ONLY=0
 UNINSTALL=0
-INSTALL_DT=0              # macOS only (off by default)
-DT_MODE="auto"            # Which DEVONthink to target on macOS: auto|3|4
-
+INSTALL_DT=0   # macOS only (off by default)
+DT_MODE="auto" # Which DEVONthink to target on macOS: auto|3|4
 
 log() { printf "%s\n" "$*" >&2; }
-die() { log "Error: $*"; exit 1; }
+die() {
+  log "Error: $*"
+  exit 1
+}
 
 usage() {
-  cat >&2 <<EOF
+  cat >&2 << EOF
 Usage: $0 [options]
 
 Options:
@@ -45,35 +47,52 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --prefix) shift; INSTALL_PREFIX="${1:-}"; [[ -n "${INSTALL_PREFIX}" ]] || die "--prefix needs a path";;
-    --with-devonthink) INSTALL_DT=1;;
-    --dt) shift; DT_MODE="${1:-auto}"; case "$DT_MODE" in auto|3|4) ;; *) die "--dt must be auto|3|4";; esac ;;
-    --no-parallel) INSTALL_PARALLEL=0;;
-    --no-imagemagick) INSTALL_IMAGEMAGICK=0;;
-    --verify-only) VERIFY_ONLY=1;;
-    --uninstall) UNINSTALL=1;;
-    -h|--help) usage; exit 0;;
-    *) die "Unknown option: $1";;
+    --prefix)
+      shift
+      INSTALL_PREFIX="${1:-}"
+      [[ -n "${INSTALL_PREFIX}" ]] || die "--prefix needs a path"
+      ;;
+    --with-devonthink) INSTALL_DT=1 ;;
+    --dt)
+      shift
+      DT_MODE="${1:-auto}"
+      case "$DT_MODE" in auto | 3 | 4) ;; *) die "--dt must be auto|3|4" ;; esac
+      ;;
+    --no-parallel) INSTALL_PARALLEL=0 ;;
+    --no-imagemagick) INSTALL_IMAGEMAGICK=0 ;;
+    --verify-only) VERIFY_ONLY=1 ;;
+    --uninstall) UNINSTALL=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
   esac
   shift
 done
 
-on_macos()  { [[ "$(uname -s)" == "Darwin" ]]; }
-on_linux()  { [[ "$(uname -s)" == "Linux"  ]]; }
+on_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
+on_linux() { [[ "$(uname -s)" == "Linux" ]]; }
 
 arch_id() {
   case "$(uname -m)" in
-    x86_64|amd64) echo "amd64" ;;
-    arm64|aarch64) echo "arm64" ;;
-    *) echo "amd64" ;;  # default
+    x86_64 | amd64) echo "amd64" ;;
+    arm64 | aarch64) echo "arm64" ;;
+    *) echo "amd64" ;; # default
   esac
 }
 
 # ---------- macOS (Homebrew) ----------
 brew_path=""
 have_brew() {
-  if [[ -x /opt/homebrew/bin/brew ]]; then brew_path=/opt/homebrew/bin/brew; return 0; fi
-  if [[ -x /usr/local/bin/brew ]]; then brew_path=/usr/local/bin/brew; return 0; fi
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    brew_path=/opt/homebrew/bin/brew
+    return 0
+  fi
+  if [[ -x /usr/local/bin/brew ]]; then
+    brew_path=/usr/local/bin/brew
+    return 0
+  fi
   return 1
 }
 eval_brew_shellenv() {
@@ -83,7 +102,10 @@ eval_brew_shellenv() {
   fi
 }
 install_homebrew_if_needed() {
-  if have_brew; then eval_brew_shellenv; return; fi
+  if have_brew; then
+    eval_brew_shellenv
+    return
+  fi
   log "[brew] Installing Homebrew..."
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   have_brew || die "Homebrew installation appears to have failed."
@@ -91,7 +113,7 @@ install_homebrew_if_needed() {
 }
 brew_install_if_missing() {
   local pkg="$1"
-  if ! brew list --formula --versions "$pkg" >/dev/null 2>&1; then
+  if ! brew list --formula --versions "$pkg" > /dev/null 2>&1; then
     log "[brew] Installing $pkg..."
     brew install "$pkg"
   else
@@ -99,21 +121,24 @@ brew_install_if_missing() {
   fi
 }
 ensure_mutool_macos() {
-  if command -v mutool >/dev/null 2>&1; then
+  if command -v mutool > /dev/null 2>&1; then
     log "[deps] mutool OK ($(command -v mutool))"
     return 0
   fi
   # Try to link from mupdf or install mupdf-tools
-  if brew list --versions mupdf >/dev/null 2>&1; then
-    brew link mupdf >/dev/null 2>&1 || true
-    if command -v mutool >/dev/null 2>&1; then log "[deps] mutool OK via mupdf"; return 0; fi
+  if brew list --versions mupdf > /dev/null 2>&1; then
+    brew link mupdf > /dev/null 2>&1 || true
+    if command -v mutool > /dev/null 2>&1; then
+      log "[deps] mutool OK via mupdf"
+      return 0
+    fi
   fi
   log "[deps] installing mupdf-tools to provide mutool..."
   if ! brew install mupdf-tools; then
     log "[deps] Homebrew refused mupdf-tools (conflict with mupdf). Try: brew unlink mupdf && brew install mupdf-tools"
     return 1
   fi
-  command -v mutool >/dev/null 2>&1 || die "mutool still not found after installing mupdf-tools"
+  command -v mutool > /dev/null 2>&1 || die "mutool still not found after installing mupdf-tools"
 }
 install_deps_macos() {
   install_homebrew_if_needed
@@ -128,11 +153,16 @@ install_deps_macos() {
 # ---------- Linux (apt/dnf/pacman/zypper) ----------
 pkg_mgr=""
 detect_pkg_mgr() {
-  if command -v apt-get >/dev/null 2>&1; then pkg_mgr="apt"
-  elif command -v dnf      >/dev/null 2>&1; then pkg_mgr="dnf"
-  elif command -v pacman   >/dev/null 2>&1; then pkg_mgr="pacman"
-  elif command -v zypper   >/dev/null 2>&1; then pkg_mgr="zypper"
-  else pkg_mgr=""
+  if command -v apt-get > /dev/null 2>&1; then
+    pkg_mgr="apt"
+  elif command -v dnf > /dev/null 2>&1; then
+    pkg_mgr="dnf"
+  elif command -v pacman > /dev/null 2>&1; then
+    pkg_mgr="pacman"
+  elif command -v zypper > /dev/null 2>&1; then
+    pkg_mgr="zypper"
+  else
+    pkg_mgr=""
   fi
 }
 linux_install_pkgs() {
@@ -159,23 +189,24 @@ linux_install_pkgs() {
   esac
 }
 install_pdfcpu_linux_if_missing() {
-  if command -v pdfcpu >/dev/null 2>&1; then
+  if command -v pdfcpu > /dev/null 2>&1; then
     log "[deps] pdfcpu already present ($(command -v pdfcpu))"
     return
   fi
   # Try package first (some distros package it)
   case "$pkg_mgr" in
-    apt)    sudo apt-get install -y pdfcpu     || true ;;
-    dnf)    sudo dnf install -y pdfcpu         || true ;;
-    pacman) sudo pacman -S --noconfirm pdfcpu  || true ;;
-    zypper) sudo zypper install -y pdfcpu      || true ;;
+    apt) sudo apt-get install -y pdfcpu || true ;;
+    dnf) sudo dnf install -y pdfcpu || true ;;
+    pacman) sudo pacman -S --noconfirm pdfcpu || true ;;
+    zypper) sudo zypper install -y pdfcpu || true ;;
   esac
-  if command -v pdfcpu >/dev/null 2>&1; then
+  if command -v pdfcpu > /dev/null 2>&1; then
     log "[deps] pdfcpu installed via package manager"
     return
   fi
   # Fallback: download prebuilt release
-  local arch; arch="$(arch_id)"
+  local arch
+  arch="$(arch_id)"
   local tmp dir
   tmp="$(mktemp -d)"
   dir="$tmp/pdfcpu"
@@ -184,12 +215,15 @@ install_pdfcpu_linux_if_missing() {
   local -a urls=(
     "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_linux_${arch}.tar.xz"
     "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_${arch}.tar.xz"
-    "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_$( [[ $arch == amd64 ]] && echo x86_64 || echo ${arch} ).tar.xz"
+    "https://github.com/pdfcpu/pdfcpu/releases/download/v${PDFCPU_VERSION}/pdfcpu_${PDFCPU_VERSION}_Linux_$([[ $arch == amd64 ]] && echo x86_64 || echo ${arch}).tar.xz"
   )
   local ok=0
   for url in "${urls[@]}"; do
     log "[deps] Trying $url"
-    if curl -fsSL "$url" -o "$tmp/pdfcpu.tar.xz"; then ok=1; break; fi
+    if curl -fsSL "$url" -o "$tmp/pdfcpu.tar.xz"; then
+      ok=1
+      break
+    fi
   done
   [[ $ok -eq 1 ]] || die "Failed to download pdfcpu tarball"
 
@@ -235,10 +269,10 @@ install_deps_linux() {
   linux_install_pkgs "${pkgs[@]}"
 
   # Ensure mutool exists (mandatory)
-  if ! command -v mutool >/dev/null 2>&1; then
+  if ! command -v mutool > /dev/null 2>&1; then
     log "[deps] mutool not found, trying 'mupdf' as a provider..."
     linux_install_pkgs mupdf || true
-    command -v mutool >/dev/null 2>&1 || die "mutool not found (install 'mupdf-tools' or 'mupdf')."
+    command -v mutool > /dev/null 2>&1 || die "mutool not found (install 'mupdf-tools' or 'mupdf')."
   fi
 
   # Ensure pdfcpu exists
@@ -265,19 +299,25 @@ dt_target_dirs() {
   )
 
   local has4=0 has3=0
-  for p in "${cands4[@]}"; do [[ -d "$p" ]] && { has4=1; break; }; done
-  for p in "${cands3[@]}"; do [[ -d "$p" ]] && { has3=1; break; }; done
+  for p in "${cands4[@]}"; do [[ -d "$p" ]] && {
+    has4=1
+    break
+  }; done
+  for p in "${cands3[@]}"; do [[ -d "$p" ]] && {
+    has3=1
+    break
+  }; done
 
   [[ -d "$base4" ]] && has4=1
   [[ -d "$base3" ]] && has3=1
 
   case "$want" in
-    4)  [[ $has4 -eq 1 ]] && printf '%s\n' "$base4" ;;
-    3)  [[ $has3 -eq 1 ]] && printf '%s\n' "$base3" ;;
-    auto|*)
-         [[ $has4 -eq 1 ]] && printf '%s\n' "$base4"
-         [[ $has3 -eq 1 ]] && printf '%s\n' "$base3"
-         ;;
+    4) [[ $has4 -eq 1 ]] && printf '%s\n' "$base4" ;;
+    3) [[ $has3 -eq 1 ]] && printf '%s\n' "$base3" ;;
+    auto | *)
+      [[ $has4 -eq 1 ]] && printf '%s\n' "$base4"
+      [[ $has3 -eq 1 ]] && printf '%s\n' "$base3"
+      ;;
   esac
 }
 
@@ -286,12 +326,12 @@ cleanup_other_dt_version_if_explicit() {
     4)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think3"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-            "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2>/dev/null || true
+        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2> /dev/null || true
       ;;
     3)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-            "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2>/dev/null || true
+        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2> /dev/null || true
       ;;
   esac
 }
@@ -318,10 +358,18 @@ install_dt_scripts_macos() {
     local rules_dir="$base/Smart Rules"
     mkdir -p "$menu_dir" "$rules_dir"
 
-    /usr/bin/osacompile -o "$menu_dir/Compress PDF Now.scpt"         "$src_menu" \
-      || { log "[get] ERROR: osacompile menu"; rm -rf "$tmp_dir"; return 1; }
+    /usr/bin/osacompile -o "$menu_dir/Compress PDF Now.scpt" "$src_menu" \
+      || {
+        log "[get] ERROR: osacompile menu"
+        rm -rf "$tmp_dir"
+        return 1
+      }
     /usr/bin/osacompile -o "$rules_dir/Compress PDF (Smart Rule).scpt" "$src_rule" \
-      || { log "[get] ERROR: osacompile smart rule"; rm -rf "$tmp_dir"; return 1; }
+      || {
+        log "[get] ERROR: osacompile smart rule"
+        rm -rf "$tmp_dir"
+        return 1
+      }
 
     log "[get] Installed DT scripts to:"
     log "  - $menu_dir/Compress PDF Now.scpt"
@@ -340,9 +388,15 @@ ensure_dirs() {
   mkdir -p "$INSTALL_PREFIX"
   if [[ "$INSTALL_PREFIX" == "$HOME/bin" ]]; then
     local export_line='export PATH="$HOME/bin:$PATH"'
-    grep -q 'HOME/bin' "$HOME/.zprofile" 2>/dev/null || { echo "$export_line" >> "$HOME/.zprofile"; log "[path] Added ~/bin to ~/.zprofile"; }
+    grep -q 'HOME/bin' "$HOME/.zprofile" 2> /dev/null || {
+      echo "$export_line" >> "$HOME/.zprofile"
+      log "[path] Added ~/bin to ~/.zprofile"
+    }
     if [[ "${SHELL##*/}" == "bash" || -f "$HOME/.bash_profile" ]]; then
-      grep -q 'HOME/bin' "$HOME/.bash_profile" 2>/dev/null || { echo "$export_line" >> "$HOME/.bash_profile"; log "[path] Added ~/bin to ~/.bash_profile"; }
+      grep -q 'HOME/bin' "$HOME/.bash_profile" 2> /dev/null || {
+        echo "$export_line" >> "$HOME/.bash_profile"
+        log "[path] Added ~/bin to ~/.bash_profile"
+      }
     fi
   fi
 }
@@ -366,6 +420,11 @@ install_files() {
   log "[get] Installing pdf-deflyt-image-recompress -> $helper_dst"
   download_to "$REPO_RAW/pdf-deflyt-image-recompress" "$helper_dst"
   chmod +x "$helper_dst"
+  if ! "$helper_dst" --help > /dev/null 2>&1; then
+    log "[verify] helper launched for the first time (it will create its PyMuPDF venv under a user-writable cache on demand)"
+  else
+    log "[verify] helper is executable"
+  fi
 
   if on_macos && [[ $INSTALL_DT -eq 1 ]]; then
     cleanup_other_dt_version_if_explicit
@@ -379,9 +438,21 @@ uninstall_everything() {
   local helper_dst="$INSTALL_PREFIX/pdf-deflyt-image-recompress"
   local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
 
-  if [[ -f "$bin_dst" ]]; then rm -f "$bin_dst"; log "[rm] $bin_dst"; removed=1; fi
-  if [[ -f "$helper_dst" ]]; then rm -f "$helper_dst"; log "[rm] $helper_dst"; removed=1; fi
-  if [[ -d "$venv_dir" ]]; then rm -rf "$venv_dir"; log "[rm] $venv_dir"; removed=1; fi
+  if [[ -f "$bin_dst" ]]; then
+    rm -f "$bin_dst"
+    log "[rm] $bin_dst"
+    removed=1
+  fi
+  if [[ -f "$helper_dst" ]]; then
+    rm -f "$helper_dst"
+    log "[rm] $helper_dst"
+    removed=1
+  fi
+  if [[ -d "$venv_dir" ]]; then
+    rm -rf "$venv_dir"
+    log "[rm] $venv_dir"
+    removed=1
+  fi
 
   if on_macos; then
     local removed_dt=0
@@ -389,8 +460,18 @@ uninstall_everything() {
       [[ -n "$base" ]] || continue
       local dt_menu="$base/Menu/Compress PDF Now.scpt"
       local dt_rules="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
-      if [[ -f "$dt_menu" ]];  then rm -f "$dt_menu";  log "[rm] $dt_menu";  removed=1; removed_dt=1; fi
-      if [[ -f "$dt_rules" ]]; then rm -f "$dt_rules"; log "[rm] $dt_rules"; removed=1; removed_dt=1; fi
+      if [[ -f "$dt_menu" ]]; then
+        rm -f "$dt_menu"
+        log "[rm] $dt_menu"
+        removed=1
+        removed_dt=1
+      fi
+      if [[ -f "$dt_rules" ]]; then
+        rm -f "$dt_rules"
+        log "[rm] $dt_rules"
+        removed=1
+        removed_dt=1
+      fi
     done < <(dt_target_dirs)
     [[ $removed_dt -eq 0 ]] && log "[uninstall] No matching DEVONthink paths (mode=$DT_MODE)."
   fi
@@ -421,7 +502,7 @@ verify_report() {
   if on_macos; then
     echo "  gstat: $(command -v gstat || echo 'MISSING (from coreutils)')"
   else
-    if stat --version >/dev/null 2>&1; then
+    if stat --version > /dev/null 2>&1; then
       echo "  stat: $(command -v stat)"
     else
       echo "  stat: MISSING"
@@ -432,9 +513,9 @@ verify_report() {
   echo "  parallel: $(command -v parallel || echo 'missing (batch processing will be serial)')"
 
   # Check for ImageMagick (both IM6 and IM7)
-  if command -v magick >/dev/null 2>&1; then
+  if command -v magick > /dev/null 2>&1; then
     echo "  imagemagick: $(command -v magick) (ICC profile support available)"
-  elif command -v convert >/dev/null 2>&1; then
+  elif command -v convert > /dev/null 2>&1; then
     echo "  imagemagick: $(command -v convert) (ICC profile support available)"
   else
     echo "  imagemagick: missing (ICC profile images will use structural compression only)"
@@ -460,8 +541,7 @@ verify_report() {
         [[ -n "$base" ]] || continue
         for f in \
           "$base/Menu/Compress PDF Now.scpt" \
-          "$base/Smart Rules/Compress PDF (Smart Rule).scpt"
-        do
+          "$base/Smart Rules/Compress PDF (Smart Rule).scpt"; do
           [[ -f "$f" ]] && any_exist=1
         done
       done < <(dt_target_dirs)

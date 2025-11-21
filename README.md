@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/
 **Compress a single PDF:**
 ```bash
 pdf-deflyt document.pdf
-# → document_deflyt.pdf  (54.3% smaller)  [ok]
+# → document_compressed.pdf  (54.3% smaller)  [ok]
 ```
 
 **Batch process a folder:**
@@ -47,7 +47,7 @@ See [Examples](#examples) for more usage patterns.
 - Skip rules to avoid work on tiny files or when savings would be negligible
 - Timestamp‑friendly: preserves file date and time for in‑place operations (APFS granularity tolerated)
 - Optional password handling for encrypted PDFs (`--password`); otherwise it will **skip or pass‑through** safely
-- Deterministic behavior and stable output naming (`*_deflyt.pdf`), unless `-o`/`--inplace` is used
+- Deterministic behavior and stable output naming (`*_compressed.pdf`), unless `-o`/`--inplace` is used
 - Integrations with DEVONthink 3 and 4
 
 ---
@@ -139,7 +139,7 @@ pdf-deflyt [options] <file-or-dir>...
 
 - `-o, --output <file>`  
   Explicit output file (single input only).  
-  If omitted, uses default naming (`*_deflyt.pdf`).
+  If omitted, uses default naming (`*_compressed.pdf`).
 
 - `--inplace`  
   Compress and overwrite the input file.  
@@ -164,9 +164,6 @@ pdf-deflyt [options] <file-or-dir>...
   Only replace a file if the compressed result is at least this much smaller.  
   If smaller savings, the original is kept.
 
-- `--skip-if-smaller <SIZE>`  
-  Skip inputs below this size threshold (e.g. `5MB`, `200k`).
-
 - `--password <pw>`  
   Password for encrypted PDFs. Without this, encrypted files are **skipped** safely.
 
@@ -177,7 +174,7 @@ pdf-deflyt [options] <file-or-dir>...
   Show version or usage.
 
 **Output naming:**  
-If neither `-o` nor `--inplace` is used, results are written next to the input as: `*_deflyt.pdf`.
+If neither `-o` nor `--inplace` is used, results are written next to the input as: `*_compressed.pdf`.
 
 
 ### Advanced Options
@@ -228,7 +225,7 @@ By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).
 **Super Basic**
 ```bash
 # Compress using the default preset ("standard").
-# Output will be written as input_deflyt.pdf next to the input,
+# Output will be written as input_compressed.pdf next to the input,
 # but only if the compressed file is meaningfully smaller.
 pdf-deflyt input.pdf
 ```
@@ -262,12 +259,6 @@ pdf-deflyt -p extreme --inplace --min-gain 25 input.pdf
 pdf-deflyt -p standard --recurse \
   --include '/Reports/' --exclude '/Drafts/' \
   --jobs 4 ~/Documents/PDFs
-```
-
-**Skip Tiny Files (<5 MB)**
-```bash
-# Skip any PDFs smaller than 5 MB entirely:
-pdf-deflyt --skip-if-smaller 5MB my.pdf -o my_small.pdf
 ```
 
 **Encrypted PDFs**
@@ -315,7 +306,7 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 - **Python 3.7+** (standard on modern macOS/Linux)
 - **PyMuPDF** (auto-installed in isolated venv on first use)
 
-The helper script automatically creates a local Python virtual environment (`.pdf-deflyt-venv`) and installs PyMuPDF on first run. No manual Python setup required.
+The helper script automatically creates an isolated Python virtual environment (next to the script when writable, otherwise under `~/.cache/pdf-deflyt/venv`) and installs PyMuPDF on first run. No manual Python setup required.
 
 ### What Happens Without ImageMagick?
 
@@ -335,7 +326,7 @@ If ImageMagick is not installed:
 # PDF with ICC profiles - automatically handled
 pdf-deflyt photo-portfolio.pdf
 # NOTICE: Detected ICC profile images, using ImageMagick-based compression
-# → photo-portfolio_deflyt.pdf  (89.4% smaller)  [ok]
+# → photo-portfolio_compressed.pdf  (89.4% smaller)  [ok]
 
 # Verify helper is working
 pdf-deflyt-image-recompress --help
@@ -378,7 +369,6 @@ pdf-deflyt --debug icc-document.pdf
 
 6. **Safety rails**  
    - `--min-gain` keeps the original unless savings meet your threshold.  
-   - `--skip-if-smaller` avoids work on tiny inputs.  
    - In `--inplace` mode, the original is only replaced if the new file qualifies.
 
 ### Preset guide (ballpark)
@@ -619,7 +609,6 @@ The suite verifies:
 - `-o` is respected
 - `--inplace` preserves timestamps (with tolerance)
 - Filters (`--include/--exclude`), recurse, jobs
-- `--skip-if-smaller`
 - `--min-gain`
 - Encrypted PDFs: safe behavior without password, success with `--password`
 - Default naming rule
@@ -660,4 +649,3 @@ clean         # remove build and generated assets
 ## License
 
 MIT © 2025 Geraint Preston
-
