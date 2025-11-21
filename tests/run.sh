@@ -64,7 +64,9 @@ ok() { [ -f "$WORK_DIR/out-standard.pdf" ] && [ -f "$WORK_DIR/out-light.pdf" ] &
 for i in {1..60}; do ok && break; sleep 0.5; done
 ok || { echo "outputs missing"; ls -al "$BUILD_DIR"; exit 2; }
 
-s() { stat_size "$1"; }
+s() {
+  stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+}
 bs=$(s "$WORK_DIR/out-standard.pdf")
 bl=$(s "$WORK_DIR/out-light.pdf")
 be=$(s "$WORK_DIR/out-extreme.pdf")
