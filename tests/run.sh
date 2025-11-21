@@ -64,7 +64,7 @@ ok() { [ -f "$WORK_DIR/out-standard.pdf" ] && [ -f "$WORK_DIR/out-light.pdf" ] &
 for i in {1..60}; do ok && break; sleep 0.5; done
 ok || { echo "outputs missing"; ls -al "$BUILD_DIR"; exit 2; }
 
-s() { stat -f%z "$1" 2>/dev/null || echo 0; }
+s() { stat_size "$1"; }
 bs=$(s "$WORK_DIR/out-standard.pdf")
 bl=$(s "$WORK_DIR/out-light.pdf")
 be=$(s "$WORK_DIR/out-extreme.pdf")
@@ -110,8 +110,8 @@ cases+=("min_gain_skip::bash -lc '
   in=\"\$ASSETS_DIR/structural.pdf\"
   out=\"\$WORK_DIR/mgain.pdf\"
   msg=\$(\"\$ROOT/pdf-deflyt\" -p lossless --min-gain 50 \"\$in\" -o \"\$out\" 2>&1 || true)
-  a=\$(stat -f%z \"\$in\")
-  b=\$(stat -f%z \"\$out\" 2>/dev/null || echo 0)
+  a=\$(stat -f%z \"\$in\" 2>/dev/null || stat -c%s \"\$in\")
+  b=\$(stat -f%z \"\$out\" 2>/dev/null || stat -c%s \"\$out\" 2>/dev/null || echo 0)
   if echo \"\$msg\" | grep -q \"kept-original\"; then
     # below threshold: output should match input size (or not exist -> treated as 0)
     [ \"\$b\" -eq \"\$a\" ]
@@ -169,15 +169,19 @@ cp "$ASSETS_DIR/gray.pdf" "$WORK_DIR/filters/B/b.pdf"
 A="$WORK_DIR/filters/A/a.pdf"
 B="$WORK_DIR/filters/B/b.pdf"
 
-a0=$(stat -f%z "$A"); am0=$(stat -f%m "$A")
-b0=$(stat -f%z "$B"); bm0=$(stat -f%m "$B")
+a0=$(stat -f%z "$A" 2>/dev/null || stat -c%s "$A")
+am0=$(stat -f%m "$A" 2>/dev/null || stat -c%Y "$A")
+b0=$(stat -f%z "$B" 2>/dev/null || stat -c%s "$B")
+bm0=$(stat -f%m "$B" 2>/dev/null || stat -c%Y "$B")
 
 # Run inplace. We keep --min-gain 0 to strongly encourage rewriting, but tolerate engines that skip if larger.
 "$ROOT/pdf-deflyt" -p light --min-gain 0 --inplace --recurse \
   --include 'A/' --exclude 'B/' "$WORK_DIR/filters" --jobs 1 >"$logdir/filters_phase2.stdout" 2>&1 || true
 
-a1=$(stat -f%z "$A"); am1=$(stat -f%m "$A")
-b1=$(stat -f%z "$B"); bm1=$(stat -f%m "$B")
+a1=$(stat -f%z "$A" 2>/dev/null || stat -c%s "$A")
+am1=$(stat -f%m "$A" 2>/dev/null || stat -c%Y "$A")
+b1=$(stat -f%z "$B" 2>/dev/null || stat -c%s "$B")
+bm1=$(stat -f%m "$B" 2>/dev/null || stat -c%Y "$B")
 
 # A must be either rewritten OR explicitly skipped by the engine.
 if [ "$a1" -eq "$a0" ] && [ "$am1" -eq "$am0" ]; then
@@ -216,8 +220,8 @@ WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 set +e
 tmp="$WORK_DIR/ip.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$tmp"
-mt0=$(stat -f %m "$tmp") || mt0=0
-sz0=$(stat -f %z "$tmp") || sz0=0
+mt0=$(stat -f %m "$tmp" 2>/dev/null || stat -c%Y "$tmp" 2>/dev/null || echo 0)
+sz0=$(stat -f %z "$tmp" 2>/dev/null || stat -c%s "$tmp" 2>/dev/null || echo 0)
 
 # Run inplace
 "$ROOT/pdf-deflyt" -p standard --min-gain 0 --inplace "$tmp"
@@ -225,8 +229,8 @@ rc=$?
 set -e
 [ $rc -eq 0 ] || { echo "pdf-deflyt failed rc=$rc"; exit 1; }
 
-sz1=$(stat -f %z "$tmp") || sz1=$sz0
-mt1=$(stat -f %m "$tmp") || mt1=$mt0
+sz1=$(stat -f %z "$tmp" 2>/dev/null || stat -c%s "$tmp" 2>/dev/null || echo "$sz0")
+mt1=$(stat -f %m "$tmp" 2>/dev/null || stat -c%Y "$tmp" 2>/dev/null || echo "$mt0")
 
 # Size: allow equal or up to +1% (rounding / metadata). Fail only if clearly larger.
 awk -v a="$sz1" -v b="$sz0" 'BEGIN{exit !(a <= b*1.01)}' \
@@ -361,7 +365,7 @@ msg=$("$ROOT/pdf-deflyt" -p standard --min-gain 50 "$in" -o "$out" 2>&1 || true)
 if echo "$msg" | grep -q "kept-original"; then
   exit 0
 else
-  [ "$(stat -f%z "$in")" -eq "$(stat -f%z "$out" 2>/dev/null || echo 0)" ]
+[ "$(stat -f%z "$in" 2>/dev/null || stat -c%s "$in")" -eq "$(stat -f%z "$out" 2>/dev/null || stat -c%s "$out" 2>/dev/null || echo 0)" ]
 fi
 SH
 chmod +x "$BUILD_DIR/min_gain_tiny.sh"
@@ -420,7 +424,7 @@ msg=$("$ROOT/pdf-deflyt" -p light "$enc" -o "$out_no" 2>&1 || true)
 # Case 1: tool says it's skipping due to encryption/password
 if echo "$msg" | grep -qiE 'SKIP.*(encrypted|password)'; then
   # either no file, or an empty stub — both OK
-  [ ! -f "$out_no" ] || [ "$(stat -f%z "$out_no")" -eq 0 ]
+  [ ! -f "$out_no" ] || [ "$(stat -f%z "$out_no" 2>/dev/null || stat -c%s "$out_no")" -eq 0 ]
 else
   # Case 2: tool didn’t skip; it produced an output but kept original
   echo "$msg" | grep -q 'kept-original'  # must acknowledge pass-through
@@ -468,8 +472,8 @@ msg=$("$ROOT/pdf-deflyt" -p standard "$in" -o "$out" 2>&1 || true)
 [ -f "$out" ] || { echo "ICC test: output not created"; exit 1; }
 
 # Check output is smaller or same size as input (allowing for small variations)
-sz_in=$(stat -f%z "$in" 2>/dev/null || stat -c%z "$in")
-sz_out=$(stat -f%z "$out" 2>/dev/null || stat -c%z "$out")
+sz_in=$(stat -f%z "$in" 2>/dev/null || stat -c%s "$in")
+sz_out=$(stat -f%z "$out" 2>/dev/null || stat -c%s "$out")
 [ "$sz_out" -le "$((sz_in + 1000))" ] || { echo "ICC test: output larger than expected"; exit 1; }
 
 # If ImageMagick helper was invoked, we should see a notice in the output

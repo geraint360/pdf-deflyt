@@ -28,7 +28,7 @@ assert_in() {
 # usage: assert_smaller OUT IN 0.10   # at least 10% smaller
 assert_smaller() {
   local out="$1" in="$2" min="$3"
-  local bo=$(stat -f%z "$out") bi=$(stat -f%z "$in")
+  local bo=$(stat_size "$out") bi=$(stat_size "$in")
   [[ "$bo" -lt $(awk -v b="$bi" -v m="$min" 'BEGIN{printf "%.0f", b*(1-m)}') ]] \
     || fail "Expected $out smaller than $in by >= $(awk -v m="$min" 'BEGIN{printf "%.0f%%",100*m}') (got $(awk -v a="$bo" -v b="$bi" 'BEGIN{printf "%.1f%%",100*(1-a/b)}'))"
   pass "$(basename "$out") is smaller than input by >= $(awk -v m="$min" 'BEGIN{printf "%.0f%%",100*m}')"
@@ -37,7 +37,7 @@ assert_smaller() {
 # assert timestamps equal (mtime only)
 assert_same_mtime() {
   local a="$1" b="$2"
-  local ma=$(stat -f%m "$a") mb=$(stat -f%m "$b")
+  local ma=$(stat_mtime "$a") mb=$(stat_mtime "$b")
   [[ "$ma" -eq "$mb" ]] || fail "mtime differs ($a: $ma, $b: $mb)"
   pass "mtime preserved"
 }
