@@ -106,8 +106,8 @@ readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
 readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
 
 # Dependency lists
-readonly -a REQUIRED_DEPS=(gs pdfcpu qpdf mutool exiftool pdfinfo pdfimages sha256sum gstat)
-readonly -a REQUIRED_PKGS=('ghostscript' 'pdfcpu' 'qpdf' 'mupdf' 'exiftool' 'poppler' 'poppler' 'coreutils' 'coreutils')
+readonly -a REQUIRED_DEPS=(gs pdfcpu qpdf mutool exiftool pdfinfo pdfimages sha256sum)
+readonly -a REQUIRED_PKGS=('ghostscript' 'pdfcpu' 'qpdf' 'mupdf' 'exiftool' 'poppler' 'poppler' 'coreutils')
 readonly -a OPTIONAL_DEPS=(parallel magick)
 readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick')
 

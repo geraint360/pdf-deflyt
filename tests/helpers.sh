@@ -3,11 +3,11 @@ red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 
 stat_size() {
-  stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+  stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0
 }
 
 stat_mtime() {
-  stat -f%m "$1" 2>/dev/null || stat -c%Y "$1" 2>/dev/null || echo 0
+  stat -f%m "$1" 2> /dev/null || stat -c%Y "$1" 2> /dev/null || echo 0
 }
 
 # run_case <name> <cmd...>
