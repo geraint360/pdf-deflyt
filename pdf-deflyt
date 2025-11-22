@@ -956,15 +956,20 @@ process_one() {
   # Strip trailing slash from TMPDIR to avoid double-slash issues with mktemp
   local tmpdir="${TMPDIR:-/tmp}"
   tmpdir="${tmpdir%/}"
-  local tmp1="$(mktemp_in "$tmpdir" "pdf-deflyt.opt.XXXXXXXX.pdf")"
-  local tmp2="$(mktemp_in "$tmpdir" "pdf-deflyt.gs.XXXXXXXX.pdf")"
-  local tmp3="$(mktemp_in "$tmpdir" "pdf-deflyt.fin.XXXXXXXX.pdf")"
-  chmod 600 "$tmp1" "$tmp2" "$tmp3"
+  local work_tmpdir
+  work_tmpdir=$(TMPDIR="$tmpdir" mktemp -d "pdf-deflyt.work.XXXXXXXX" 2>/dev/null) || {
+    log_error "Failed to create working temp directory in $tmpdir"
+    exit 1
+  }
+  local tmp1="$work_tmpdir/opt.pdf"
+  local tmp2="$work_tmpdir/gs.pdf"
+  local tmp3="$work_tmpdir/fin.pdf"
 
   setopt localtraps
   cleanup() {
     # Clean up all temp files, including intermediate files from failed operations
-    rm -f "$tmp1" "$tmp2" "$tmp3" "${tmp3}.w" "${tmp3}.c" 2>/dev/null || true
+    rm -f "${tmp3}.w" "${tmp3}.c" 2>/dev/null || true
+    rm -rf "$work_tmpdir" 2>/dev/null || true
     # If decrypted file exists in this scope, clean it up too
     [[ -n "${dec:-}" && -f "$dec" ]] && rm -f "$dec" 2>/dev/null || true
   }
