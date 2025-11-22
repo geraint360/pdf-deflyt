@@ -14,7 +14,11 @@ FIX="${FIX:-1}"
 # --- zsh syntax check (quiet unless error) ---
 # Only if the zsh entrypoint exists.
 if [[ -f "$ROOT/pdf-deflyt" ]]; then
-  zsh -n "$ROOT/pdf-deflyt"
+  if command -v zsh > /dev/null 2>&1; then
+    zsh -n "$ROOT/pdf-deflyt"
+  else
+    echo "WARN: zsh not found; skipping pdf-deflyt syntax check" >&2
+  fi
 fi
 
 # --- format bash test scripts (shfmt) ---
