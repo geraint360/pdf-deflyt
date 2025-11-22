@@ -251,6 +251,15 @@ log_success() { $QUIET || echo "${C_GREEN}✓${C_RESET} $*"; }
 log_verbose() { (( VERBOSE >= 1 )) && echo "${C_CYAN}VERBOSE:${C_RESET} $*"; }
 log_debug() { (( VERBOSE >= 2 )) && echo "${C_MAGENTA}DEBUG:${C_RESET} $*"; }
 
+mktemp_in() {
+  local dir="$1" tpl="$2" tmp
+  tmp=$(TMPDIR="$dir" mktemp "$tpl" 2>/dev/null) || {
+    log_error "Failed to create temporary file in $dir (template: $tpl)"
+    exit 1
+  }
+  echo "$tmp"
+}
+
 # Validate password file
 if [[ -n "$PASSWORD_FILE" ]]; then
   if [[ ! -f "$PASSWORD_FILE" ]]; then
@@ -910,7 +919,7 @@ process_one() {
     tmpdir="${tmpdir%/}"
 
     local dec
-    dec="$(mktemp "$tmpdir/pdf-deflyt.dec.XXXXXXXX.pdf")"
+    dec="$(mktemp_in "$tmpdir" "pdf-deflyt.dec.XXXXXXXX.pdf")"
     chmod 600 "$dec" 2>/dev/null || true
 
     if qpdf --password="$PASS" --decrypt -- "$IN" "$dec" >/dev/null 2>&1; then
@@ -947,9 +956,9 @@ process_one() {
   # Strip trailing slash from TMPDIR to avoid double-slash issues with mktemp
   local tmpdir="${TMPDIR:-/tmp}"
   tmpdir="${tmpdir%/}"
-  local tmp1="$(mktemp "$tmpdir/pdf-deflyt.opt.XXXXXXXX.pdf")"
-  local tmp2="$(mktemp "$tmpdir/pdf-deflyt.gs.XXXXXXXX.pdf")"
-  local tmp3="$(mktemp "$tmpdir/pdf-deflyt.fin.XXXXXXXX.pdf")"
+  local tmp1="$(mktemp_in "$tmpdir" "pdf-deflyt.opt.XXXXXXXX.pdf")"
+  local tmp2="$(mktemp_in "$tmpdir" "pdf-deflyt.gs.XXXXXXXX.pdf")"
+  local tmp3="$(mktemp_in "$tmpdir" "pdf-deflyt.fin.XXXXXXXX.pdf")"
   chmod 600 "$tmp1" "$tmp2" "$tmp3"
 
   setopt localtraps
@@ -1190,7 +1199,7 @@ run_wrapper() {
   if [[ "${DRYRUN:-false}" == true ]]; then
     local tmpdir="${TMPDIR:-/tmp}"
     tmpdir="${tmpdir%/}"
-    local tmp1="$(mktemp "$tmpdir/pdf-deflyt.dry.XXXXXXXX.pdf")"
+    local tmp1="$(mktemp_in "$tmpdir" "pdf-deflyt.dry.XXXXXXXX.pdf")"
     local ORIG_BYTES=$(size_of "$f")
 
     pdfcpu optimize -quiet "$f" "$tmp1" >/dev/null 2>&1 || cp "$f" "$tmp1" || { echo "DRY: $f (unreadable)"; return 0; }
