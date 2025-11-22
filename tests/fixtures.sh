@@ -34,8 +34,12 @@ mkpdf_img() {
       -resize "${ptw}x${pth}!" -page "${ptw}x${pth}" \
       -compress JPEG -quality 85 \
       "$out"
-  else
-    # Fallback: sips -> temp PDF, then Ghostscript to fix page size & fit
+  elif command -v convert > /dev/null 2>&1; then
+    convert "$img" -units PixelsPerInch -density 144 \
+      -resize "${ptw}x${pth}!" -page "${ptw}x${pth}" \
+      -compress JPEG -quality 85 \
+      "$out"
+  elif command -v sips > /dev/null 2>&1; then
     local tmpPDF="${out%.pdf}.tmp.sips.pdf"
     /usr/bin/sips -s format pdf "$img" --out "$tmpPDF" > /dev/null
     gs -q -dBATCH -dNOPAUSE -sDEVICE=pdfwrite \
@@ -43,6 +47,9 @@ mkpdf_img() {
       -dFIXEDMEDIA -dPDFFitPage \
       -sOutputFile="$out" "$tmpPDF" > /dev/null
     rm -f "$tmpPDF"
+  else
+    echo "ERROR: Need ImageMagick (magick or convert) or sips to build fixtures" >&2
+    exit 1
   fi
 }
 
@@ -53,6 +60,8 @@ mkimg_rgb() {
   local w="$1" h="$2" out="$3"
   if _have magick; then
     magick -size "${w}x${h}" gradient:orange-blue "$out"
+  elif _have convert; then
+    convert -size "${w}x${h}" gradient:orange-blue "$out"
   else
     # sips can’t make gradients; we build a solid RGB then annotate to add entropy
     local tmp="$out.tmp.jpg"
@@ -65,6 +74,8 @@ mkimg_gray() {
   local w="$1" h="$2" out="$3"
   if _have magick; then
     magick -size "${w}x${h}" gradient:gray50-gray90 -colorspace Gray "$out"
+  elif _have convert; then
+    convert -size "${w}x${h}" gradient:gray50-gray90 -colorspace Gray "$out"
   else
     local tmp="$out.tmp.jpg"
     /usr/bin/sips -s format jpeg --resampleWidth "$w" --resampleHeight "$h" -s formatOptions best --setProperty formatOptions best /System/Library/CoreServices/DefaultDesktop.jpg --out "$tmp" > /dev/null
@@ -77,6 +88,8 @@ mkimg_mono() {
   local w="$1" h="$2" out="$3"
   if _have magick; then
     magick -size "${w}x${h}" xc:white -fill black -draw "rectangle 0,0 $((w / 2)),$((h / 2))" -monochrome "$out"
+  elif _have convert; then
+    convert -size "${w}x${h}" xc:white -fill black -draw "rectangle 0,0 $((w / 2)),$((h / 2))" -monochrome "$out"
   else
     # sips can’t do true 1bpp; approximate with hi-contrast JPEG
     local tmp="$out.tmp.jpg"
