@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y ghostscript qpdf mupdf-tools poppler-utils exiftool parallel imagemagick curl golang-go
           # Install pdfcpu via go install to avoid fragile archive downloads
           export GOBIN=/usr/local/bin
-          go install github.com/pdfcpu/pdfcpu/cmd/pdfcpu@${PDFCPU_VER#v}
+          go install github.com/pdfcpu/pdfcpu/cmd/pdfcpu@latest
           pdfcpu version
 
       - name: Make script executable
