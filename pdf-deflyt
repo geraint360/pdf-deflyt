@@ -964,6 +964,10 @@ process_one() {
   local tmp1="$work_tmpdir/opt.pdf"
   local tmp2="$work_tmpdir/gs.pdf"
   local tmp3="$work_tmpdir/fin.pdf"
+  : > "$tmp1"
+  : > "$tmp2"
+  : > "$tmp3"
+  chmod 600 "$tmp1" "$tmp2" "$tmp3"
 
   setopt localtraps
   cleanup() {
