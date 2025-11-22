@@ -24,6 +24,7 @@ jobs:
             ${{ runner.os }}-brew-
 
       - name: Install dependencies (macOS)
+        id: install-macos
         run: |
           brew update
           brew install ghostscript pdfcpu qpdf mupdf-tools exiftool poppler coreutils parallel imagemagick
@@ -38,6 +39,7 @@ jobs:
         run: make lint
 
       - name: Smoke
+        if: steps.install-macos.outcome == 'success'
         run: make smoke
 
       - name: Make script executable
@@ -61,6 +63,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies (Linux)
+        id: install-linux
         env:
           PDFCPU_VER: v0.7.1
         run: |
@@ -88,6 +91,7 @@ jobs:
         run: make lint
 
       - name: Smoke
+        if: steps.install-linux.outcome == 'success'
         run: make smoke
 
       - name: Run tests
