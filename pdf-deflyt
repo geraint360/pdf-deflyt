@@ -413,6 +413,7 @@ is_cache_fresh() {
   [[ -f "$cache_file" ]] || return 1
 
   local cache_mtime=$(stat_time "$cache_file" mtime)
+  [[ "$cache_mtime" =~ ^[0-9]+$ ]] || return 1
   local now=$(date +%s)
   local age=$((now - cache_mtime))
 
