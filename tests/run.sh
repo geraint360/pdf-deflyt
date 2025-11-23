@@ -222,8 +222,29 @@ WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
 set +e
 tmp="$WORK_DIR/ip.pdf"
 cp "$ASSETS_DIR/mixed.pdf" "$tmp"
-mt0=$(stat -f %m "$tmp" 2>/dev/null || stat -c%Y "$tmp" 2>/dev/null || echo 0)
-sz0=$(stat -f %z "$tmp" 2>/dev/null || stat -c%s "$tmp" 2>/dev/null || echo 0)
+
+stat_value() {
+  local field="$1" file="$2" val=""
+  if [[ "$field" == "size" ]]; then
+    val=$(stat -c%s "$file" 2>/dev/null || stat -f %z "$file" 2>/dev/null)
+  else
+    val=$(stat -c%Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null)
+  fi
+  if [[ -z "${val:-}" ]]; then
+    val=$(python3 - "$file" "$field" <<'PY'
+import os, sys
+path = sys.argv[1]
+field = sys.argv[2]
+st = os.stat(path)
+print(int(st.st_size if field == 'size' else st.st_mtime))
+PY
+  ) || val=0
+  fi
+  echo "$val"
+}
+
+mt0=$(stat_value mtime "$tmp")
+sz0=$(stat_value size "$tmp")
 
 # Run inplace
 "$ROOT/pdf-deflyt" -p standard --min-gain 0 --inplace "$tmp"
@@ -231,8 +252,8 @@ rc=$?
 set -e
 [ $rc -eq 0 ] || { echo "pdf-deflyt failed rc=$rc"; exit 1; }
 
-sz1=$(stat -f %z "$tmp" 2>/dev/null || stat -c%s "$tmp" 2>/dev/null || echo "$sz0")
-mt1=$(stat -f %m "$tmp" 2>/dev/null || stat -c%Y "$tmp" 2>/dev/null || echo "$mt0")
+sz1=$(stat_value size "$tmp")
+mt1=$(stat_value mtime "$tmp")
 
 # Size: allow equal or up to +1% (rounding / metadata). Fail only if clearly larger.
 awk -v a="$sz1" -v b="$sz0" 'BEGIN{exit !(a <= b*1.01)}' \
