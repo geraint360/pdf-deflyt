@@ -84,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/
   - For the optional ability to recode FlateDecode (zlib-compressed) embedded images carrying ICC profiles as lossy JPEGs
 	   - **imagemagick**
      - **Python 3.7+** (standard on modern macOS/Linux)
-     - **PyMuPDF** (auto-installed in isolated venv on first use)
+     - **PyMuPDF** (prepared by the installer when available, or already present on the system)
 
 - **Does not** install DEVONthink scripts unless explicitly requested. (Obviously, this is a macOS-only feature.)
 
@@ -304,9 +304,9 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 
 - **ImageMagick 6 or 7** (installed automatically by installer)
 - **Python 3.7+** (standard on modern macOS/Linux)
-- **PyMuPDF** (auto-installed in isolated venv on first use)
+- **PyMuPDF** (prepared by the installer when available, or already present on the system)
 
-The helper script automatically creates an isolated Python virtual environment (next to the script when writable, otherwise under `~/.cache/pdf-deflyt/venv`) and installs PyMuPDF on first run. No manual Python setup required.
+The helper script uses PyMuPDF from a prebuilt local virtual environment when the installer has created one. It does not create that environment on demand at runtime.
 
 ### What Happens Without ImageMagick?
 
@@ -450,9 +450,9 @@ Let DEVONthink complete OCR **before** compression (pdf-deflyt does **not** perf
 
 Use the installer to place the compiled scripts into the correct **DEVONthink 4**/**3** folders. By default, it auto-detects what you have installed:
 
-```bash 
-(curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/install-pdf-deflyt.sh \)
- | bash -s -- --with-devonthink
+```bash
+curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh \
+  | bash -s -- --with-devonthink
 ```
 >Tip: Re-running the installer will **update** the scripts to the latest version automatically.
 
@@ -529,18 +529,22 @@ Use the `--prefix` option if you need to override defaults.
   brew install imagemagick  # macOS
   sudo apt install imagemagick  # Linux
   ```
+  If the error mentions PyMuPDF being unavailable, rerun the installer so it can prepare the helper environment:
+  ```
+  ./scripts/install-pdf-deflyt.sh
+  ```
   Verify helper exists:
   ```
   ls -l $(dirname $(which pdf-deflyt))/pdf-deflyt-image-recompress
   pdf-deflyt-image-recompress --help
   ```
-  The Python virtual environment is created automatically on first use.
+  The helper does not create its Python environment on demand at runtime.
 
 - **Images look corrupted or have wrong colors**  
   This can happen with ICC profile images if ImageMagick is not installed. Install ImageMagick and re-run compression.  
 
 - **"NOTICE: Detected ICC profile images"**  
-  This is informational - your PDF has complex color profiles.   Compression will take slightly longer but colors will be preserved.   If you see "WARNING: ImageMagick helper unavailable", install ImageMagick.
+  This is informational - your PDF has complex color profiles. Compression will take slightly longer but colors will be preserved. If you see "WARNING: ICC helper unavailable", rerun the installer to prepare PyMuPDF and make sure ImageMagick is installed.
 
 
 ---
@@ -556,7 +560,7 @@ make install-bin          # installs ./pdf-deflyt to ~/bin/pdf-deflyt (default)
 ```
 Ensure `~/bin` is on your `PATH`. Override the target with:
 ```bash
-make install-bin PREFIX=/some/other/bin
+make install-bin BIN_DIR=/some/other/bin
 ```
 
 ## DEVONthink Scripts (Optional)
@@ -632,7 +636,7 @@ make lint FIX=1     # report only
 ## Make Targets
 
 ```text
-install-bin   # copy ./pdf-deflyt → ~/bin/pdf-deflyt (override PREFIX=...)
+install-bin   # copy ./pdf-deflyt → ~/bin/pdf-deflyt (override BIN_DIR=...)
 compile       # build AppleScripts → devonthink-scripts/compiled
 install-dt    # install compiled scripts into DEVONthink App Scripts folder
 install       # = install-bin + install-dt

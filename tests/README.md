@@ -14,6 +14,7 @@ It builds deterministic fixtures, runs parallelized checks across all presets, a
 - Parallelism: `--jobs` processes multiple files concurrently
 - Quiet mode: `--quiet` suppresses the summary line
 - Non-PDF inputs: are skipped without crashing
+- ICC helper behavior: no runtime PyMuPDF bootstrap, clean fallback when missing
 - Strength ordering: file sizes follow `extreme ≤ standard ≤ light` (with tolerance)
 
 ## Requirements
@@ -102,6 +103,9 @@ make test-clean            # wipe tests/assets*, tests/build
 
 - **Filters test fails**  
   The suite exercises both default output (`_compressed.pdf`) and `--inplace` modes; ensure `--include`/`--exclude` patterns are POSIX ERE (like `grep -E`), and that your build hasn’t overridden those flags.
+
+- **ICC helper reports PyMuPDF is unavailable**  
+  That means the runtime environment does not already provide PyMuPDF and the installer could not prepare the helper venv. Compression will still fall back to structural optimization, but ICC-aware recompression will be unavailable until PyMuPDF is installed.
 
 ## CI (optional)
 

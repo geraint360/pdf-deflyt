@@ -279,6 +279,76 @@ install_deps_linux() {
   install_pdfcpu_linux_if_missing
 }
 
+prepare_pymupdf_support() {
+  [[ $INSTALL_IMAGEMAGICK -eq 1 ]] || {
+    log "[deps] Skipping PyMuPDF setup (--no-imagemagick was requested)."
+    return 0
+  }
+
+  if command -v python3 > /dev/null 2>&1 && python3 -c 'import fitz' > /dev/null 2>&1; then
+    log "[deps] PyMuPDF already available from system Python"
+    return 0
+  fi
+
+  local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
+  local -a venv_candidates=(
+    "$venv_dir/bin/python3"
+    "$venv_dir/bin/python"
+    "$venv_dir/bin/python3.14"
+    "$venv_dir/bin/python3.13"
+  )
+  local venv_python=""
+
+  for candidate in "${venv_candidates[@]}"; do
+    if [[ -x "$candidate" ]] && "$candidate" -c 'import fitz' > /dev/null 2>&1; then
+      venv_python="$candidate"
+      break
+    fi
+  done
+
+  if [[ -n "$venv_python" ]]; then
+    log "[deps] PyMuPDF already installed in $venv_dir"
+    return 0
+  fi
+
+  command -v python3 > /dev/null 2>&1 || {
+    log "[deps] python3 not found; ICC profile support will be unavailable"
+    return 1
+  }
+
+  log "[deps] Preparing PyMuPDF venv at $venv_dir ..."
+  rm -rf "$venv_dir"
+  if ! python3 -m venv "$venv_dir"; then
+    log "[deps] Could not create $venv_dir; ICC profile support will be unavailable"
+    return 1
+  fi
+
+  for candidate in "${venv_candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      venv_python="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$venv_python" ]]; then
+    log "[deps] Could not find a Python interpreter inside $venv_dir"
+    return 1
+  fi
+
+  log "[deps] Installing PyMuPDF into $venv_dir ..."
+  if ! "$venv_python" -m pip install --quiet PyMuPDF; then
+    log "[deps] Failed to install PyMuPDF; ICC profile support will be unavailable"
+    return 1
+  fi
+
+  if ! "$venv_python" -c 'import fitz' > /dev/null 2>&1; then
+    log "[deps] PyMuPDF verification failed in $venv_dir"
+    return 1
+  fi
+
+  log "[deps] PyMuPDF ready in $venv_dir"
+}
+
 # ---------- DEVONthink installation ----------
 
 dt_target_dirs() {
@@ -421,9 +491,13 @@ install_files() {
   download_to "$REPO_RAW/pdf-deflyt-image-recompress" "$helper_dst"
   chmod +x "$helper_dst"
   if ! "$helper_dst" --help > /dev/null 2>&1; then
-    log "[verify] helper launched for the first time (it will create its PyMuPDF venv under a user-writable cache on demand)"
+    log "[verify] helper launched successfully"
   else
     log "[verify] helper is executable"
+  fi
+
+  if [[ $INSTALL_IMAGEMAGICK -eq 1 ]]; then
+    prepare_pymupdf_support || true
   fi
 
   if on_macos && [[ $INSTALL_DT -eq 1 ]]; then
@@ -574,10 +648,14 @@ verify_report() {
   echo
   echo "Python environment for helper:"
   local venv_dir="$INSTALL_PREFIX/.pdf-deflyt-venv"
-  if [[ -d "$venv_dir" ]]; then
+  if [[ -x "$venv_dir/bin/python3" ]] && "$venv_dir/bin/python3" -c 'import fitz' > /dev/null 2>&1; then
     echo "  Virtual env: $venv_dir (PyMuPDF installed)"
+  elif command -v python3 > /dev/null 2>&1 && python3 -c 'import fitz' > /dev/null 2>&1; then
+    echo "  Python: system interpreter already provides PyMuPDF"
   else
-    echo "  Virtual env: Will be created on first use of ICC profile compression"
+    echo "  Virtual env: missing"
+    echo "  ICC support: run ./scripts/install-pdf-deflyt.sh again to prepare PyMuPDF, or provide"
+    echo "  a system Python that can import fitz"
   fi
 }
 

@@ -16,7 +16,7 @@ set -o pipefail
 # For ICC profile image support:
 #   - ImageMagick is required (brew install imagemagick)
 #   - Helper script pdf-deflyt-image-recompress must be in same directory
-#   - Python dependencies are auto-managed by the helper (no manual setup)
+#   - PyMuPDF is prepared during installation when possible
 
 usage() {
   cat <<'EOF'
@@ -34,7 +34,8 @@ Presets:
   -p standard   (default) Auto-tuned per-PDF based on content analysis
   -p extreme    Maximum compression, smaller files (≈144dpi, JPEG Q68)
   -p lossless   Structure-only, no image recompression (ultra-safe)
-  (Helpers: `pdf-deflyt-image-recompress` auto-installs PyMuPDF in a user-writable cache if needed.)
+  (Helpers: `pdf-deflyt-image-recompress` uses PyMuPDF from the installer-prepared
+  environment when available.)
 
 Common Options:
   --inplace            Replace originals (creates automatic .bak backup)
@@ -1092,8 +1093,8 @@ process_one() {
       mv "$tmp1_repaired" "$tmp1"
     fi
     if ! python_recompress_images "$tmp1" "$tmp2" "$JPEGQ" "$C_RES" "$G_RES"; then
-      log "WARNING: ImageMagick not found - using structural compression only (1-5% typical savings)"
-      log "         Install ImageMagick for better compression: brew install imagemagick"
+      log "WARNING: ICC helper unavailable - using structural compression only (1-5% typical savings)"
+      log "         Re-run ./scripts/install-pdf-deflyt.sh to prepare PyMuPDF, or install ImageMagick and PyMuPDF manually"
       cp "$tmp1" "$tmp2"
     fi
   elif (( (C_CNT > 0 && ${C_MIN%.*} > 0 && ${C_MIN%.*} < C_RES) || \

@@ -512,6 +512,42 @@ else
   echo "Skipping ICC profile test (ImageMagick not found or SKIP_IMAGEMAGICK_TESTS=1)" >&2
 fi
 
+# (J2) ICC helper must not self-bootstrap PyMuPDF at runtime
+cat > "$BUILD_DIR/icc_helper_offline.sh" << 'IHO'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+in="$ASSETS_DIR/rgb.pdf"
+out="$WORK_DIR/icc_helper_offline.pdf"
+rm -f "$out"
+
+msg=$("$ROOT/pdf-deflyt-image-recompress" "$in" "$out" 2>&1 || true)
+
+if echo "$msg" | grep -Eq 'Installing PyMuPDF|Failed to setup environment|No matching distribution found'; then
+  echo "helper attempted runtime bootstrap"
+  echo "$msg"
+  exit 1
+fi
+
+if echo "$msg" | grep -q 'PyMuPDF is not available'; then
+  echo "$msg" | grep -qi 're-run the installer' || {
+    echo "missing installer guidance"
+    echo "$msg"
+    exit 1
+  }
+  [ ! -f "$out" ] || { echo "unexpected output file when helper lacks PyMuPDF"; exit 1; }
+else
+  [ -f "$out" ] || { echo "helper neither succeeded nor reported missing PyMuPDF"; echo "$msg"; exit 1; }
+fi
+IHO
+chmod +x "$BUILD_DIR/icc_helper_offline.sh"
+cases+=("icc_helper_offline::bash \"$BUILD_DIR/icc_helper_offline.sh\"")
+
 # (K) --post-hook execution
 cat > "$BUILD_DIR/posthook_body.sh" << 'POSTHOOK'
 #!/usr/bin/env bash

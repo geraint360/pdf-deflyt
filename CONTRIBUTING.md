@@ -176,7 +176,7 @@ pdf-deflyt/
 
 Maintainers follow this process:
 
-1. Update version in `pdf-deflyt` and `package.json`
+1. Update version in `pdf-deflyt`
 2. Update CHANGELOG.md
 3. Run full test suite
 4. Create git tag: `git tag v2.x.x`

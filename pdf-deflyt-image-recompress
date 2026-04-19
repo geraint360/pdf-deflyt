@@ -5,11 +5,10 @@ Helper script for pdf-deflyt to handle ICC profile images using ImageMagick
 
 DEPENDENCIES:
   System: ImageMagick (brew install imagemagick)
-  Python: PyMuPDF (auto-installed in local venv on first run)
+  Python: PyMuPDF (provided by the installer or already available on PATH)
 
-The script automatically creates a virtual environment (next to the helper when
-possible, otherwise under ~/.cache/pdf-deflyt/venv) and installs PyMuPDF on
-first run. No manual pip installation required.
+The script will use a prebuilt local virtual environment next to the helper
+when present. It does not create or bootstrap that environment at runtime.
 
 USAGE:
   pdf-deflyt-image-recompress [-v] [-q QUALITY] INPUT OUTPUT
@@ -28,57 +27,39 @@ def check_imagemagick():
     """Check if ImageMagick is available (magick or convert)"""
     return shutil.which('magick') is not None or shutil.which('convert') is not None
 
-# Virtual environment setup for PyMuPDF only
 SCRIPT_DIR = Path(__file__).parent.resolve()
-
-def _resolve_venv_dir():
-    """Return a writable path for the helper virtual environment."""
-    candidate = SCRIPT_DIR / ".pdf-deflyt-venv"
-    if candidate.exists() or os.access(SCRIPT_DIR, os.W_OK):
-        return candidate
-
-    cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    fallback_root = cache_home / "pdf-deflyt"
-    try:
-        fallback_root.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return candidate
-    return fallback_root / "venv"
-
-VENV_DIR = _resolve_venv_dir()
+VENV_DIR = SCRIPT_DIR / ".pdf-deflyt-venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python3"
 
-def setup_venv():
-    """Create virtual environment and install PyMuPDF only"""
-    if VENV_DIR.exists():
-        return True
-    
-    print("First run: Setting up Python environment...", file=sys.stderr)
-    try:
-        subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
-        print("Installing PyMuPDF...", file=sys.stderr)
-        subprocess.run([
-            str(VENV_PYTHON), "-m", "pip", "install", "--quiet", "PyMuPDF"
-        ], check=True)
-        print("Setup complete!", file=sys.stderr)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR: Failed to setup environment: {e}", file=sys.stderr)
+def _venv_has_pymupdf():
+    if not VENV_PYTHON.exists():
         return False
 
-def run_in_venv():
-    """Re-run this script in the virtual environment"""
-    if not VENV_PYTHON.exists():
-        if not setup_venv():
-            sys.exit(1)
+    try:
+        subprocess.run(
+            [str(VENV_PYTHON), "-c", "import fitz"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
+if _venv_has_pymupdf() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), __file__] + sys.argv[1:])
 
-# If not running in venv, switch to it
-if sys.prefix == sys.base_prefix:
-    run_in_venv()
-
-# Now in venv, import PyMuPDF
-import fitz
+try:
+    import fitz
+except ImportError:
+    print(
+        "ERROR: PyMuPDF is not available. Re-run the installer with "
+        "./scripts/install-pdf-deflyt.sh to prepare ICC support, or provide a "
+        "prebuilt .pdf-deflyt-venv / a system Python that can import fitz.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 import argparse
 
 # Configuration constants
