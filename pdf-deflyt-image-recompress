@@ -29,26 +29,35 @@ def check_imagemagick():
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 VENV_DIR = SCRIPT_DIR / ".pdf-deflyt-venv"
-VENV_PYTHON = VENV_DIR / "bin" / "python3"
+VENV_CANDIDATES = [
+    VENV_DIR / "bin" / "python3",
+    VENV_DIR / "bin" / "python",
+    VENV_DIR / "bin" / "python3.14",
+    VENV_DIR / "bin" / "python3.13",
+]
 
 def _venv_has_pymupdf():
-    if not VENV_PYTHON.exists():
-        return False
+    for candidate in VENV_CANDIDATES:
+        if not candidate.exists():
+            continue
 
-    try:
-        subprocess.run(
-            [str(VENV_PYTHON), "-c", "import fitz"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return True
-    except (OSError, subprocess.CalledProcessError):
-        return False
+        try:
+            subprocess.run(
+                [str(candidate), "-c", "import fitz"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return candidate
+        except (OSError, subprocess.CalledProcessError):
+            continue
+
+    return None
 
 
-if _venv_has_pymupdf() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
-    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), __file__] + sys.argv[1:])
+venv_python = _venv_has_pymupdf()
+if venv_python is not None and Path(sys.prefix).resolve() != VENV_DIR.resolve():
+    os.execv(str(venv_python), [str(venv_python), __file__] + sys.argv[1:])
 
 try:
     import fitz

@@ -105,6 +105,33 @@ cases_serial+=("strength_order::bash \"$BUILD_DIR/strength_order_body.sh\"")
 # 3) --dry-run shows estimate
 cases+=("dry_run::$ROOT/pdf-deflyt --dry-run -p standard \"$ASSETS_DIR/mixed.pdf\" | grep -E 'DRY: .+ est_savings≈.+%  est_size≈.+\\(from'")
 
+# 3b) Work tempdir fallback when TMPDIR is unusable
+cat > "$BUILD_DIR/tempdir_fallback.sh" << 'TF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+bad_tmp="$WORK_DIR/bad-tmp"
+rm -rf "$bad_tmp"
+mkdir -p "$bad_tmp"
+chmod 500 "$bad_tmp"
+
+out="$WORK_DIR/tempdir-fallback.pdf"
+TMPDIR="$bad_tmp" "$ROOT/pdf-deflyt" -p standard "$ASSETS_DIR/mixed.pdf" -o "$out" >/dev/null
+[ -f "$out" ]
+TF
+chmod +x "$BUILD_DIR/tempdir_fallback.sh"
+cases+=("tempdir_fallback::bash \"$BUILD_DIR/tempdir_fallback.sh\"")
+
+# 3c) DEVONthink scripts should not reference the removed helper
+cases+=("dt_scripts_no_helper_ref::bash -lc '
+  ! grep -R -n \"pdf-deflyt-dt-apply\" \"$ROOT/devonthink-scripts/src\" \"$ROOT/README.md\" \"$ROOT/scripts/install-pdf-deflyt.sh\"
+'")
+
 # 4) --inplace preserves mtime and reduces size (on imagey file)
 
 # 5) --min-gain skip keeps original when savings < threshold

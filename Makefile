@@ -81,19 +81,33 @@ compile:
 install-dt: compile
 	@mkdir -p "$(DT_MENU)" "$(DT_RULES)"
 	@echo "Installing scripts:"
+	@rm -f "$(DT_MENU)/Compress PDF Now.scpt" \
+	       "$(DT_MENU)/pdf-deflyt Compress PDF Now.scpt" \
+	       "$(DT_MENU)/pdf-deflyt DT4 Compress PDF Now.scpt" \
+	       "$(DT_MENU)/pdf-deflyt DT4 v3 Compress PDF Now.scpt" \
+	       "$(DT_RULES)/Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt"
 	@if [ -f "$(COMPILED_DIR)/Compress PDF Now.scpt" ]; then \
-		cp -f "$(COMPILED_DIR)/Compress PDF Now.scpt" "$(DT_MENU)/"; \
+		cp -f "$(COMPILED_DIR)/Compress PDF Now.scpt" "$(DT_MENU)/Compress PDF Now.scpt"; \
 		echo "  ✓ Compress PDF Now.scpt → Menu"; \
 	fi
-	@if [ -f "$(COMPILED_DIR)/PDF Deflyt (Smart Rule).scpt" ]; then \
-		cp -f "$(COMPILED_DIR)/PDF Deflyt (Smart Rule).scpt" "$(DT_RULES)/"; \
-		echo "  ✓ PDF Deflyt (Smart Rule).scpt → Smart Rules"; \
+	@if [ -f "$(COMPILED_DIR)/Compress PDF (Smart Rule).scpt" ]; then \
+		cp -f "$(COMPILED_DIR)/Compress PDF (Smart Rule).scpt" "$(DT_RULES)/Compress PDF (Smart Rule).scpt"; \
+		echo "  ✓ Compress PDF (Smart Rule).scpt → Smart Rules"; \
 	fi
 	@echo "Done: installed to DEVONthink scripts folders."
 
 uninstall-dt:
 	@rm -f "$(DT_MENU)/Compress PDF Now.scpt" \
-	       "$(DT_RULES)/PDF Deflyt (Smart Rule).scpt" || true
+	       "$(DT_MENU)/pdf-deflyt Compress PDF Now.scpt" \
+	       "$(DT_MENU)/pdf-deflyt DT4 Compress PDF Now.scpt" \
+	       "$(DT_MENU)/pdf-deflyt DT4 v3 Compress PDF Now.scpt" \
+	       "$(DT_RULES)/Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" || true
 	@echo "Removed DT scripts from:"
 	@echo "  • $(DT_MENU)"
 	@echo "  • $(DT_RULES)"

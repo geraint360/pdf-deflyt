@@ -116,7 +116,17 @@ readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick')
 : "${PDF_DEFLYT_HELPER:=}"
 
 # Caching directory for performance optimizations
-readonly CACHE_DIR="${TMPDIR:-/tmp}/pdf-deflyt-cache-${USER:-$(id -u)}"
+readonly CACHE_DIR="$(
+  for root in "${TMPDIR:-}" "/private/tmp" "/tmp" "/var/tmp" "${HOME:-}/Library/Caches/pdf-deflyt"; do
+    [[ -n "$root" ]] || continue
+    root="${root%/}"
+    mkdir -p "$root" 2>/dev/null || true
+    [[ -w "$root" ]] || continue
+    printf '%s' "$root"
+    break
+  done
+  printf '%s' "/tmp"
+)/pdf-deflyt-cache-${USER:-$(id -u)}"
 readonly DEPS_CACHE="$CACHE_DIR/deps.cache"
 readonly CACHE_TTL=86400  # 24 hours in seconds
 
@@ -254,11 +264,45 @@ log_debug() { (( VERBOSE >= 2 )) && echo "${C_MAGENTA}DEBUG:${C_RESET} $*"; }
 
 mktemp_in() {
   local dir="$1" tpl="$2" tmp
-  tmp=$(TMPDIR="$dir" mktemp "$tpl" 2>/dev/null) || {
-    log_error "Failed to create temporary file in $dir (template: $tpl)"
-    exit 1
-  }
+  tmp=$(TMPDIR="$dir" mktemp "$tpl" 2>/dev/null) || return 1
   echo "$tmp"
+}
+
+mktemp_dir_in() {
+  local dir="$1" tpl="$2" tmp
+  tmp=$(mktemp -d "$dir/$tpl" 2>/dev/null) || return 1
+  echo "$tmp"
+}
+
+choose_temp_root() {
+  local -a roots=(
+    "${TMPDIR:-}"
+    "/private/tmp"
+    "/tmp"
+    "/var/tmp"
+    "${HOME:-}/Library/Caches/pdf-deflyt"
+  )
+  local root
+  for root in "${roots[@]}"; do
+    [[ -n "$root" ]] || continue
+    root="${root%/}"
+    mkdir -p "$root" 2>/dev/null || true
+    [[ -w "$root" ]] || continue
+    echo "$root"
+    return 0
+  done
+  return 1
+}
+
+choose_work_tmpdir() {
+  local root tmpdir
+  root="$(choose_temp_root)" || return 1
+  if tmpdir="$(mktemp_dir_in "$root" "pdf-deflyt.work.XXXXXXXX")"; then
+    [[ "${VERBOSE:-0}" -ge 2 ]] && log_debug "Using work temp directory root: $root"
+    echo "$tmpdir"
+    return 0
+  fi
+  return 1
 }
 
 # Validate password file
@@ -815,19 +859,24 @@ python_recompress_images() {
   if [[ -n "$PDF_DEFLYT_HELPER" && -x "$PDF_DEFLYT_HELPER" ]]; then
     helper="$PDF_DEFLYT_HELPER"
   else
-    # 2) Resolve this script's directory in zsh reliably (works in Shortcuts)
-    local this="${0:A}" 2>/dev/null || this="$0"
-    local script_dir="${this:h}"
     local helper=""
-    # 3) Search order: alongside script, then CWD, then PATH
-    if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
-      helper="$script_dir/pdf-deflyt-image-recompress"
-    elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
-      helper="./pdf-deflyt-image-recompress"
-    elif helper="$(command -v pdf-deflyt-image-recompress 2>/dev/null)"; then
-      :
+    # 2) Prefer the installed helper next to the user's bin copy.
+    if [[ -x "$HOME/bin/pdf-deflyt-image-recompress" ]]; then
+      helper="$HOME/bin/pdf-deflyt-image-recompress"
     else
-      return 1
+      # 3) Resolve this script's directory in zsh reliably (works in Shortcuts)
+      local this="${0:A}" 2>/dev/null || this="$0"
+      local script_dir="${this:h}"
+      # 4) Search order: alongside script, then CWD, then PATH
+      if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
+        helper="$script_dir/pdf-deflyt-image-recompress"
+      elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
+        helper="./pdf-deflyt-image-recompress"
+      elif helper="$(command -v pdf-deflyt-image-recompress 2>/dev/null)"; then
+        :
+      else
+        return 1
+      fi
     fi
   fi
 
@@ -917,11 +966,18 @@ process_one() {
   # $IN → current input file
   # $orig → original input path (for logging), if you have it
   if [[ -n "$PASS" ]]; then
-    local tmpdir="${TMPDIR:-/tmp}"
-    tmpdir="${tmpdir%/}"
+    local tmpdir
+    tmpdir="$(choose_temp_root)" || {
+      log_error "Failed to find a writable temporary directory"
+      exit 1
+    }
 
     local dec
     dec="$(mktemp_in "$tmpdir" "pdf-deflyt.dec.XXXXXXXX.pdf")"
+    if [[ -z "$dec" ]]; then
+      log_error "Failed to create temporary file in $tmpdir (template: pdf-deflyt.dec.XXXXXXXX.pdf)"
+      exit 1
+    fi
     chmod 600 "$dec" 2>/dev/null || true
 
     if qpdf --password="$PASS" --decrypt -- "$IN" "$dec" >/dev/null 2>&1; then
@@ -955,12 +1011,9 @@ process_one() {
   fi
 
   local dir="$(dirname "$IN")"
-  # Strip trailing slash from TMPDIR to avoid double-slash issues with mktemp
-  local tmpdir="${TMPDIR:-/tmp}"
-  tmpdir="${tmpdir%/}"
   local work_tmpdir
-  work_tmpdir=$(TMPDIR="$tmpdir" mktemp -d "pdf-deflyt.work.XXXXXXXX" 2>/dev/null) || {
-    log_error "Failed to create working temp directory in $tmpdir"
+  work_tmpdir="$(choose_work_tmpdir)" || {
+    log_error "Failed to create working temp directory (tried TMPDIR, /private/tmp, /tmp, /var/tmp, and ~/Library/Caches/pdf-deflyt)"
     exit 1
   }
   local tmp1="$work_tmpdir/opt.pdf"
@@ -1208,9 +1261,15 @@ run_wrapper() {
   fi
 
   if [[ "${DRYRUN:-false}" == true ]]; then
-    local tmpdir="${TMPDIR:-/tmp}"
-    tmpdir="${tmpdir%/}"
-    local tmp1="$(mktemp_in "$tmpdir" "pdf-deflyt.dry.XXXXXXXX.pdf")"
+    local tmpdir tmp1
+    tmpdir="$(choose_temp_root)" || {
+      log_error "Failed to find a writable temporary directory"
+      exit 1
+    }
+    tmp1="$(mktemp_in "$tmpdir" "pdf-deflyt.dry.XXXXXXXX.pdf")" || {
+      log_error "Failed to create temporary file in $tmpdir (template: pdf-deflyt.dry.XXXXXXXX.pdf)"
+      exit 1
+    }
     local ORIG_BYTES=$(size_of "$f")
 
     pdfcpu optimize -quiet "$f" "$tmp1" >/dev/null 2>&1 || cp "$f" "$tmp1" || { echo "DRY: $f (unreadable)"; return 0; }

@@ -396,12 +396,22 @@ cleanup_other_dt_version_if_explicit() {
     4)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think3"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2> /dev/null || true
+        "$other/Menu/pdf-deflyt Compress PDF Now.scpt" \
+        "$other/Menu/pdf-deflyt DT4 Compress PDF Now.scpt" \
+        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" 2> /dev/null || true
       ;;
     3)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think"
       rm -f "$other/Menu/Compress PDF Now.scpt" \
-        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" 2> /dev/null || true
+        "$other/Menu/pdf-deflyt Compress PDF Now.scpt" \
+        "$other/Menu/pdf-deflyt DT4 Compress PDF Now.scpt" \
+        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
+        "$other/Smart Rules/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" 2> /dev/null || true
       ;;
   esac
 }
@@ -427,6 +437,11 @@ install_dt_scripts_macos() {
     local menu_dir="$base/Menu"
     local rules_dir="$base/Smart Rules"
     mkdir -p "$menu_dir" "$rules_dir"
+    rm -f "$menu_dir/Compress PDF Now.scpt" "$menu_dir/pdf-deflyt Compress PDF Now.scpt" \
+      "$menu_dir/pdf-deflyt DT4 Compress PDF Now.scpt" \
+      "$rules_dir/Compress PDF (Smart Rule).scpt" "$rules_dir/pdf-deflyt Compress PDF (Smart Rule).scpt" \
+      "$rules_dir/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
+      "$rules_dir/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt"
 
     /usr/bin/osacompile -o "$menu_dir/Compress PDF Now.scpt" "$src_menu" \
       || {
@@ -440,7 +455,6 @@ install_dt_scripts_macos() {
         rm -rf "$tmp_dir"
         return 1
       }
-
     log "[get] Installed DT scripts to:"
     log "  - $menu_dir/Compress PDF Now.scpt"
     log "  - $rules_dir/Compress PDF (Smart Rule).scpt"
@@ -534,15 +548,43 @@ uninstall_everything() {
       [[ -n "$base" ]] || continue
       local dt_menu="$base/Menu/Compress PDF Now.scpt"
       local dt_rules="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
+      local dt_menu_named="$base/Menu/pdf-deflyt Compress PDF Now.scpt"
+      local dt_rules_named="$base/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt"
+      local dt_menu_dt4="$base/Menu/pdf-deflyt DT4 Compress PDF Now.scpt"
+      local dt_rules_dt4="$base/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt"
       if [[ -f "$dt_menu" ]]; then
         rm -f "$dt_menu"
         log "[rm] $dt_menu"
         removed=1
         removed_dt=1
       fi
+      if [[ -f "$dt_menu_named" ]]; then
+        rm -f "$dt_menu_named"
+        log "[rm] $dt_menu_named"
+        removed=1
+        removed_dt=1
+      fi
+      if [[ -f "$dt_menu_dt4" ]]; then
+        rm -f "$dt_menu_dt4"
+        log "[rm] $dt_menu_dt4"
+        removed=1
+        removed_dt=1
+      fi
       if [[ -f "$dt_rules" ]]; then
         rm -f "$dt_rules"
         log "[rm] $dt_rules"
+        removed=1
+        removed_dt=1
+      fi
+      if [[ -f "$dt_rules_named" ]]; then
+        rm -f "$dt_rules_named"
+        log "[rm] $dt_rules_named"
+        removed=1
+        removed_dt=1
+      fi
+      if [[ -f "$dt_rules_dt4" ]]; then
+        rm -f "$dt_rules_dt4"
+        log "[rm] $dt_rules_dt4"
         removed=1
         removed_dt=1
       fi

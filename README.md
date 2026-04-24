@@ -437,29 +437,31 @@ make benchmark RUNS=5    # Average over 5 runs
 
 There are two AppleScripts provided:
 
-1. **Compress PDF Now** — a menu/toolbar action to compress the selected PDFs immediately.
-2. **Compress PDF (Smart Rule)** — a handler for DEVONthink Smart Rules to compress PDFs automatically when they meet certain conditions (e.g. added to a group, file size > X).
+1. **Compress PDF Now** - a menu action that compresses the selected PDFs immediately.
+2. **Compress PDF (Smart Rule)** - a DEVONthink Smart Rule handler that compresses PDFs automatically when they match your conditions (for example, when they are added to a group or exceed a size threshold).
 
-
-By default, both scripts use **pdf-deflyt** with the **standard** compression preset, but this can be changed by editing the AppleScript headers if you prefer a different preset.
+Both scripts use **pdf-deflyt** with the **standard** compression preset by default, but you can change that by editing the AppleScript source. The scripts perform the apply-or-fail logic directly in AppleScript and only replace the original file when the compressed PDF is smaller.
 
 Let DEVONthink complete OCR **before** compression (pdf-deflyt does **not** perform OCR).
+
+Both scripts append to the shared log file at `~/Library/Logs/pdf-deflyt.log`.
 
 
 ### Installation
 
-Use the installer to place the compiled scripts into the correct **DEVONthink 4**/**3** folders. By default, it auto-detects what you have installed:
+Use the installer to place the compiled scripts into the correct **DEVONthink 4**/**3** folders. By default, it auto-detects what you have installed and installs the scripts under their original names:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/install-pdf-deflyt.sh \
   | bash -s -- --with-devonthink
 ```
->Tip: Re-running the installer will **update** the scripts to the latest version automatically.
+>Tip: Re-running the installer will **update** the scripts automatically.
 
 **For DEVONthink 3:**
 The scripts are compatible but are installed into a different path:
-``~/Library/Application Scripts/com.devon-technologies.think3/``
+`~/Library/Application Scripts/com.devon-technologies.think3/`
 Use the `--prefix` option if you need to override defaults.
+If you are updating from an older install, remove any leftover prefixed copies from DEVONthink’s script folders so only the original script names remain.
 
 ### Using the Scripts in DEVONthink
 
@@ -469,9 +471,8 @@ Use the `--prefix` option if you need to override defaults.
 **Compress PDF (Smart Rule)**
 - Create a **Smart Rule** (_Tools → New Smart Rule…_)
 - Choose your conditions (e.g. Kind is PDF, Size > 300 KB, etc.).
-- Under **Perform the following actions**, select **Apply Script…** and choose
-**Compress PDF (Smart Rule)**.
-- For unattended operation, use `--inplace --min-gain 1` for safety, or customise flags in the AppleScript source.
+- Under **Perform the following actions**, select **Apply Script…** and choose **Compress PDF (Smart Rule)**.
+- For unattended operation, use `--inplace --min-gain 1` for safety, or customise the flags in the AppleScript source.
 
 **Recommended Defaults**
 
@@ -573,6 +574,8 @@ make install-dt           # installs compiled .scpt into DEVONthink’s “App S
 # Or both:
 make install              # = install-bin + install-dt
 ```
+
+`make install` is the easiest way to get a working DEVONthink setup because it installs the helper binaries into `~/bin` as well as the compiled scripts.
 
 By default, installs go to DEVONthink 4 locations.  
 If you are using DEVONthink 3, specify the version explicitly:

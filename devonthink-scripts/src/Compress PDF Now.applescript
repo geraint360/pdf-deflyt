@@ -1,117 +1,135 @@
--- PDF Squeeze for DEVONthink 4
--- Purpose: Compress the currently selected PDFs in DEVONthink using ~/bin/pdf-deflyt
+-- PDF Deflyt for DEVONthink 4
+-- Purpose: Compress the currently selected PDFs in DEVONthink using pdf-deflyt
 -- Put into ~/Library/Application Scripts/com.devon-technologies.think/Menu
--- Logging: ~/Library/Logs/pdf-deflyt.log
 
-property LOG_HFS : ((path to library folder from user domain) as text) & "Logs:pdf-deflyt.log"
-property DEBUG_MODE : false
+use framework "Foundation"
+use scripting additions
 
-on logMsg(m)
+on appendLog(tag, msg)
 	try
-		set ts to do shell script "/bin/date '+%Y-%m-%d %H:%M:%S'"
-		set logline to ts & " [Compress Now] " & (m as text) & linefeed
-		
-		-- make sure the Logs folder exists
-		do shell script "/bin/mkdir -p ~/Library/Logs"
-		
-		-- use POSIX file (safe even if the file doesn't exist yet)
-		set f to POSIX file ((POSIX path of LOG_HFS))
-		
-		set fh to open for access f with write permission
-		try
-			set eof fh to (get eof fh) -- append
-		end try
-		write logline to fh starting at eof
-		close access fh
-	on error e number n
-		try
-			close access f
-		end try
-		error e number n
+		set homePath to (current application's NSHomeDirectory() as text)
+		set logDir to homePath & "/Library/Logs"
+		set logFile to logDir & "/pdf-deflyt.log"
+		set logLine to "[" & tag & "] " & (msg as text) & linefeed
+		set fm to current application's NSFileManager's defaultManager()
+		set createdDir to fm's createDirectoryAtPath:logDir withIntermediateDirectories:true attributes:(missing value) |error|:(missing value)
+		set existingText to ""
+		if (fm's fileExistsAtPath:logFile) as boolean then
+			set existingText to (current application's NSString's stringWithContentsOfFile:logFile encoding:(current application's NSUTF8StringEncoding) |error|:(missing value)) as text
+		end if
+		set updatedText to existingText & logLine
+		set updatedString to current application's NSString's stringWithString:updatedText
+		updatedString's writeToFile:logFile atomically:true encoding:(current application's NSUTF8StringEncoding) |error|:(missing value)
 	end try
-end logMsg
+end appendLog
 
-on findTool()
-	-- collect env info with a safe PATH and log it to ~/Library/Logs/pdf-deflyt.log
-	set envPATH to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; printf %s \"$PATH\"'"
-	set whichPdfcpu to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdfcpu || true'"
-	set whichDeflyt to do shell script "/bin/sh -c 'export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; command -v pdf-deflyt || true'"
-	
-	if DEBUG_MODE then
-		my logMsg("DEBUG PATH=" & envPATH)
-		my logMsg("DEBUG which pdfcpu=" & whichPdfcpu)
-		my logMsg("DEBUG which pdf-deflyt=" & whichDeflyt)
-	end if
-	
-	-- now resolve pdf-deflyt with the same safe PATH
-	set sh to "
-    export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-    if [ -x \"$HOME/bin/pdf-deflyt\" ]; then
-      echo \"$HOME/bin/pdf-deflyt\";
-    elif command -v pdf-deflyt >/dev/null 2>&1; then
-      command -v pdf-deflyt;
-    elif [ -x /opt/homebrew/bin/pdf-deflyt ]; then
-      echo /opt/homebrew/bin/pdf-deflyt;
-    elif [ -x /usr/local/bin/pdf-deflyt ]; then
-      echo /usr/local/bin/pdf-deflyt;
-    else
-      echo '';
-    fi"
-	set p to do shell script sh
-	if p is "" then error "pdf-deflyt not found. Put it in ~/bin or install via Homebrew."
-	return p
-end findTool
+on runTask(executablePath, arguments)
+	set task to current application's NSTask's launchedTaskWithLaunchPath:executablePath arguments:arguments
+	task's waitUntilExit()
+	return task's terminationStatus() as integer
+end runTask
 
-tell application id "DNtp" -- DEVONthink 4
-	set sel to selection
-	if sel is {} then error "Select one or more PDF records in DEVONthink."
-	
-	set toolPath to my findTool()
-	my logMsg("Tool: " & toolPath)
-	
-	repeat with r in sel
+on sizeOfFile(posixPath)
+	set fm to current application's NSFileManager's defaultManager()
+	set attrs to fm's attributesOfItemAtPath:posixPath |error|:(missing value)
+	return ((attrs's objectForKey:"NSFileSize") as integer)
+end sizeOfFile
+
+on tempDir()
+	set fm to current application's NSFileManager's defaultManager()
+	set rootDir to current application's NSTemporaryDirectory() as text
+	set workDir to rootDir & "pdf-deflyt.dt"
+	set ok to fm's createDirectoryAtPath:workDir withIntermediateDirectories:true attributes:(missing value) |error|:(missing value)
+	if ok is false then error "Failed to create temp directory: " & workDir
+	return workDir
+end tempDir
+
+on pathWithoutExtension(posixPath)
+	set nsPath to current application's NSString's stringWithString:posixPath
+	return nsPath's stringByDeletingPathExtension() as text
+end pathWithoutExtension
+
+on replaceFile(stagePath, sourcePath)
+	set status to my runTask("/bin/mv", {"-f", stagePath, sourcePath})
+	if status is not 0 then error "Failed to replace source file (" & status & ")"
+end replaceFile
+
+on removePath(posixPath)
+	my runTask("/bin/rm", {"-rf", posixPath})
+end removePath
+
+on refreshRecord(r)
+	try
+		tell application "DEVONthink"
+			set selection of window 1 to {missing value}
+			set selection of window 1 to {r}
+		end tell
+	on error errMsg number errNum
+		my appendLog("Compress Now", "WARN: refresh failed on " & (name of r as text) & ": " & errMsg & " (" & errNum & ")")
+	end try
+end refreshRecord
+
+on runCompression(sourcePath, recordName, tag)
+	set workDir to my tempDir()
+	set outputPath to workDir & "/output.pdf"
+	set sourceDir to (current application's NSString's stringWithString:sourcePath)'s stringByDeletingLastPathComponent() as text
+	set inputBytes to 0
+	set outputBytes to 0
+	try
+		set pdfDeflytPath to (current application's NSHomeDirectory() as text) & "/bin/pdf-deflyt"
+		set status to my runTask("/usr/bin/env", {"PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", pdfDeflytPath, "-p", "standard", "-o", outputPath, sourcePath})
+		if status is not 0 then error "pdf-deflyt exited with status " & status
+
+		set inputBytes to my sizeOfFile(sourcePath)
+		set outputBytes to my sizeOfFile(outputPath)
+		if outputBytes is greater than or equal to inputBytes then
+			my appendLog(tag, "FAIL on " & recordName & ": output not smaller (" & inputBytes & " -> " & outputBytes & "); keeping original")
+			my removePath(workDir)
+			return false
+		end if
+
+		set stagePath to sourceDir & "/.pdf-deflyt.stage.pdf"
+		set status to my runTask("/bin/cp", {"-f", outputPath, stagePath})
+		if status is not 0 then error "Failed to stage output (" & status & ")"
+		my replaceFile(stagePath, sourcePath)
+		my removePath(workDir)
+		my appendLog(tag, "Done " & recordName & " (" & inputBytes & " -> " & outputBytes & " bytes)")
+		my refreshRecord(r)
+		return true
+	on error errMsg number errNum
 		try
-			if (type of r is PDF document) then
-				set nm to (name of r as rich text)
-				set pth to (path of r)
-				if pth is missing value then error "Record has no file path: " & nm
-				
-				set envPATH to "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; "
-				set out to do shell script ("/bin/sh -c " & quoted form of (envPATH & quoted form of toolPath & " --inplace --min-gain 3 --quiet " & quoted form of pth & " 2>&1"))
-				if out is not "" then my logMsg("Output:" & linefeed & out)
-				
-				-- Cleanup: remove any stray sibling Ò_compressed.pdfÓ (when we kept the original)
-				-- and obvious Ghostscript/temporary artifacts in the same folder.
-				try
-					-- remove sibling Ò*_compressed.pdfÓ if it exists
-					set rmSib to do shell script ("/bin/sh -c " & quoted form of ("p=" & quoted form of pth & "; d=$(dirname \"$p\"); b=$(basename \"$p\" .pdf); f=\"$d/${b}_compressed.pdf\"; if [ -f \"$f\" ]; then rm -f \"$f\" && echo removed; fi"))
-					if rmSib is "removed" then my logMsg("Cleanup: removed stray _compressed.pdf")
-				on error e
-					my logMsg("Cleanup (sibling) error: " & e)
-				end try
-				
-				try
-					-- sweep common dot-temp patterns from Ghostscript or interrupted runs
-					do shell script ("/bin/sh -c " & quoted form of ("p=" & quoted form of pth & "; d=$(dirname \"$p\"); " & Â
-						"find \"$d\" -maxdepth 1 -type f \\( -name '.tmp.*' -o -name '.*.tmp.*' -o -name '*.gs.*' -o -name '*._tmp.*' -o -name '*._fin.*' \\) -delete 2>/dev/null || true"))
-				on error e
-					my logMsg("Cleanup (temps) error: " & e)
-				end try
-				
-				try
-					-- DT4: refresh the record from the file on disk
-					tell application id "DNtp" to synchronize record r
-				on error number -1701
-					-- Older dictionary variants: try the classic update
-					try
-						tell application id "DNtp" to update record r
-					end try
-				end try
-				my logMsg("Done: " & nm)
-			end if
-		on error errMsg number errNum
-			my logMsg("ERROR on record '" & (name of r as rich text) & "': " & errMsg & " (" & errNum & ")")
-			display notification errMsg with title "pdf-deflyt" subtitle (name of r)
+			my removePath(workDir)
 		end try
-	end repeat
-end tell
+		my appendLog(tag, "FAIL on " & recordName & ": " & errMsg & " (" & errNum & "); keeping original")
+		return false
+	end try
+end runCompression
+
+on compressRecord(r)
+	tell application "DEVONthink"
+		set pth to (path of r)
+		if pth is missing value then error "Record has no file path: " & (name of r as text)
+		set recordName to (name of r as text)
+	end tell
+	set sourcePath to POSIX path of pth
+	my appendLog("Compress Now", "Starting " & recordName & " -> " & sourcePath)
+	my runCompression(sourcePath, recordName, "Compress Now")
+end compressRecord
+
+	try
+		tell application "DEVONthink"
+			if (count of windows) is 0 then error "No DEVONthink window is open."
+			set theWindow to window 1
+			set sel to selection of theWindow
+			if sel is {} then error "Select one or more PDF records in DEVONthink."
+			repeat with r in sel
+				try
+					my compressRecord(r)
+				on error errMsg number errNum
+					my appendLog("Compress Now", "ERROR on " & (name of r as text) & ": " & errMsg & " (" & errNum & ")")
+				end try
+			end repeat
+		end tell
+	on error errMsg number errNum
+		my appendLog("Compress Now", "FATAL: " & errMsg & " (" & errNum & ")")
+	end try
