@@ -32,6 +32,8 @@ endif
 DT_SCRIPTS_DIR := $(HOME)/Library/Application Scripts/$(DT_BUNDLE)
 DT_MENU    := $(DT_SCRIPTS_DIR)/Menu
 DT_RULES   := $(DT_SCRIPTS_DIR)/Smart Rules
+DT_MENU_SCRIPT := Compress PDF Now.scpt
+DT_RULE_SCRIPT := Compress PDF (Smart Rule).scpt
 
 .PHONY: compile clean show-paths test test-clean install-bin install-dt uninstall-dt install lint smoke smoke-clean fmt benchmark
 
@@ -81,30 +83,30 @@ compile:
 install-dt: compile
 	@mkdir -p "$(DT_MENU)" "$(DT_RULES)"
 	@echo "Installing scripts:"
-	@rm -f "$(DT_MENU)/Compress PDF Now.scpt" \
+	@rm -f "$(DT_MENU)/$(DT_MENU_SCRIPT)" \
 	       "$(DT_MENU)/pdf-deflyt Compress PDF Now.scpt" \
 	       "$(DT_MENU)/pdf-deflyt DT4 Compress PDF Now.scpt" \
 	       "$(DT_MENU)/pdf-deflyt DT4 v3 Compress PDF Now.scpt" \
-	       "$(DT_RULES)/Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/$(DT_RULE_SCRIPT)" \
 	       "$(DT_RULES)/pdf-deflyt Compress PDF (Smart Rule).scpt" \
 	       "$(DT_RULES)/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
 	       "$(DT_RULES)/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt"
-	@if [ -f "$(COMPILED_DIR)/Compress PDF Now.scpt" ]; then \
-		cp -f "$(COMPILED_DIR)/Compress PDF Now.scpt" "$(DT_MENU)/Compress PDF Now.scpt"; \
-		echo "  ✓ Compress PDF Now.scpt → Menu"; \
+	@if [ -f "$(COMPILED_DIR)/$(DT_MENU_SCRIPT)" ]; then \
+		cp -f "$(COMPILED_DIR)/$(DT_MENU_SCRIPT)" "$(DT_MENU)/$(DT_MENU_SCRIPT)"; \
+		echo "  ✓ $(DT_MENU_SCRIPT) → Menu"; \
 	fi
-	@if [ -f "$(COMPILED_DIR)/Compress PDF (Smart Rule).scpt" ]; then \
-		cp -f "$(COMPILED_DIR)/Compress PDF (Smart Rule).scpt" "$(DT_RULES)/Compress PDF (Smart Rule).scpt"; \
-		echo "  ✓ Compress PDF (Smart Rule).scpt → Smart Rules"; \
+	@if [ -f "$(COMPILED_DIR)/$(DT_RULE_SCRIPT)" ]; then \
+		cp -f "$(COMPILED_DIR)/$(DT_RULE_SCRIPT)" "$(DT_RULES)/$(DT_RULE_SCRIPT)"; \
+		echo "  ✓ $(DT_RULE_SCRIPT) → Smart Rules"; \
 	fi
 	@echo "Done: installed to DEVONthink scripts folders."
 
 uninstall-dt:
-	@rm -f "$(DT_MENU)/Compress PDF Now.scpt" \
+	@rm -f "$(DT_MENU)/$(DT_MENU_SCRIPT)" \
 	       "$(DT_MENU)/pdf-deflyt Compress PDF Now.scpt" \
 	       "$(DT_MENU)/pdf-deflyt DT4 Compress PDF Now.scpt" \
 	       "$(DT_MENU)/pdf-deflyt DT4 v3 Compress PDF Now.scpt" \
-	       "$(DT_RULES)/Compress PDF (Smart Rule).scpt" \
+	       "$(DT_RULES)/$(DT_RULE_SCRIPT)" \
 	       "$(DT_RULES)/pdf-deflyt Compress PDF (Smart Rule).scpt" \
 	       "$(DT_RULES)/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
 	       "$(DT_RULES)/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" || true

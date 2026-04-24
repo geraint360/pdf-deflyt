@@ -13,6 +13,18 @@ set -euo pipefail
 #
 REPO_RAW="https://raw.githubusercontent.com/geraint360/pdf-deflyt/main"
 PDFCPU_VERSION="0.11.0" # linux fallback download if no package is available
+DT_MENU_SCRIPT_NAME="Compress PDF Now.scpt"
+DT_RULE_SCRIPT_NAME="Compress PDF (Smart Rule).scpt"
+DT_MENU_LEGACY_SCRIPT_NAMES=(
+  "pdf-deflyt Compress PDF Now.scpt"
+  "pdf-deflyt DT4 Compress PDF Now.scpt"
+  "pdf-deflyt DT4 v3 Compress PDF Now.scpt"
+)
+DT_RULE_LEGACY_SCRIPT_NAMES=(
+  "pdf-deflyt Compress PDF (Smart Rule).scpt"
+  "pdf-deflyt DT4 Compress PDF (Smart Rule).scpt"
+  "pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt"
+)
 
 PREFIX_DEFAULT="$HOME/bin"
 INSTALL_PREFIX="$PREFIX_DEFAULT"
@@ -73,6 +85,15 @@ done
 
 on_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 on_linux() { [[ "$(uname -s)" == "Linux" ]]; }
+
+remove_named_files() {
+  local dir="$1"
+  shift
+  local name
+  for name in "$@"; do
+    rm -f "$dir/$name"
+  done
+}
 
 arch_id() {
   case "$(uname -m)" in
@@ -395,23 +416,13 @@ cleanup_other_dt_version_if_explicit() {
   case "${DT_MODE:-auto}" in
     4)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think3"
-      rm -f "$other/Menu/Compress PDF Now.scpt" \
-        "$other/Menu/pdf-deflyt Compress PDF Now.scpt" \
-        "$other/Menu/pdf-deflyt DT4 Compress PDF Now.scpt" \
-        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" 2> /dev/null || true
+      remove_named_files "$other/Menu" "$DT_MENU_SCRIPT_NAME" "${DT_MENU_LEGACY_SCRIPT_NAMES[@]}" || true
+      remove_named_files "$other/Smart Rules" "$DT_RULE_SCRIPT_NAME" "${DT_RULE_LEGACY_SCRIPT_NAMES[@]}" || true
       ;;
     3)
       local other="$HOME/Library/Application Scripts/com.devon-technologies.think"
-      rm -f "$other/Menu/Compress PDF Now.scpt" \
-        "$other/Menu/pdf-deflyt Compress PDF Now.scpt" \
-        "$other/Menu/pdf-deflyt DT4 Compress PDF Now.scpt" \
-        "$other/Smart Rules/Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
-        "$other/Smart Rules/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt" 2> /dev/null || true
+      remove_named_files "$other/Menu" "$DT_MENU_SCRIPT_NAME" "${DT_MENU_LEGACY_SCRIPT_NAMES[@]}" || true
+      remove_named_files "$other/Smart Rules" "$DT_RULE_SCRIPT_NAME" "${DT_RULE_LEGACY_SCRIPT_NAMES[@]}" || true
       ;;
   esac
 }
@@ -437,27 +448,24 @@ install_dt_scripts_macos() {
     local menu_dir="$base/Menu"
     local rules_dir="$base/Smart Rules"
     mkdir -p "$menu_dir" "$rules_dir"
-    rm -f "$menu_dir/Compress PDF Now.scpt" "$menu_dir/pdf-deflyt Compress PDF Now.scpt" \
-      "$menu_dir/pdf-deflyt DT4 Compress PDF Now.scpt" \
-      "$rules_dir/Compress PDF (Smart Rule).scpt" "$rules_dir/pdf-deflyt Compress PDF (Smart Rule).scpt" \
-      "$rules_dir/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt" \
-      "$rules_dir/pdf-deflyt DT4 v3 Compress PDF (Smart Rule).scpt"
+    remove_named_files "$menu_dir" "$DT_MENU_SCRIPT_NAME" "${DT_MENU_LEGACY_SCRIPT_NAMES[@]}"
+    remove_named_files "$rules_dir" "$DT_RULE_SCRIPT_NAME" "${DT_RULE_LEGACY_SCRIPT_NAMES[@]}"
 
-    /usr/bin/osacompile -o "$menu_dir/Compress PDF Now.scpt" "$src_menu" \
+    /usr/bin/osacompile -o "$menu_dir/$DT_MENU_SCRIPT_NAME" "$src_menu" \
       || {
         log "[get] ERROR: osacompile menu"
         rm -rf "$tmp_dir"
         return 1
       }
-    /usr/bin/osacompile -o "$rules_dir/Compress PDF (Smart Rule).scpt" "$src_rule" \
+    /usr/bin/osacompile -o "$rules_dir/$DT_RULE_SCRIPT_NAME" "$src_rule" \
       || {
         log "[get] ERROR: osacompile smart rule"
         rm -rf "$tmp_dir"
         return 1
       }
     log "[get] Installed DT scripts to:"
-    log "  - $menu_dir/Compress PDF Now.scpt"
-    log "  - $rules_dir/Compress PDF (Smart Rule).scpt"
+    log "  - $menu_dir/$DT_MENU_SCRIPT_NAME"
+    log "  - $rules_dir/$DT_RULE_SCRIPT_NAME"
   done < <(dt_target_dirs)
 
   rm -rf "$tmp_dir"
@@ -546,12 +554,12 @@ uninstall_everything() {
     local removed_dt=0
     while IFS= read -r base; do
       [[ -n "$base" ]] || continue
-      local dt_menu="$base/Menu/Compress PDF Now.scpt"
-      local dt_rules="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
-      local dt_menu_named="$base/Menu/pdf-deflyt Compress PDF Now.scpt"
-      local dt_rules_named="$base/Smart Rules/pdf-deflyt Compress PDF (Smart Rule).scpt"
-      local dt_menu_dt4="$base/Menu/pdf-deflyt DT4 Compress PDF Now.scpt"
-      local dt_rules_dt4="$base/Smart Rules/pdf-deflyt DT4 Compress PDF (Smart Rule).scpt"
+      local dt_menu="$base/Menu/$DT_MENU_SCRIPT_NAME"
+      local dt_rules="$base/Smart Rules/$DT_RULE_SCRIPT_NAME"
+      local dt_menu_named="$base/Menu/${DT_MENU_LEGACY_SCRIPT_NAMES[0]}"
+      local dt_rules_named="$base/Smart Rules/${DT_RULE_LEGACY_SCRIPT_NAMES[0]}"
+      local dt_menu_dt4="$base/Menu/${DT_MENU_LEGACY_SCRIPT_NAMES[1]}"
+      local dt_rules_dt4="$base/Smart Rules/${DT_RULE_LEGACY_SCRIPT_NAMES[1]}"
       if [[ -f "$dt_menu" ]]; then
         rm -f "$dt_menu"
         log "[rm] $dt_menu"
@@ -642,11 +650,13 @@ verify_report() {
     if [[ $INSTALL_DT -eq 1 ]]; then
       echo "DEVONthink scripts (mode=$DT_MODE):"
       local any=0
+      echo "  expected menu: $DT_MENU_SCRIPT_NAME"
+      echo "  expected rule: $DT_RULE_SCRIPT_NAME"
       while IFS= read -r base; do
         [[ -n "$base" ]] || continue
         any=1
-        local menu="$base/Menu/Compress PDF Now.scpt"
-        local rule="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
+        local menu="$base/Menu/$DT_MENU_SCRIPT_NAME"
+        local rule="$base/Smart Rules/$DT_RULE_SCRIPT_NAME"
         [[ -f "$menu" ]] && echo "  OK      $menu" || echo "  MISSING $menu"
         [[ -f "$rule" ]] && echo "  OK      $rule" || echo "  MISSING $rule"
       done < <(dt_target_dirs)
@@ -664,10 +674,12 @@ verify_report() {
 
       if [[ $any_exist -eq 1 ]]; then
         echo "DEVONthink scripts detected (mode=$DT_MODE):"
+        echo "  expected menu: $DT_MENU_SCRIPT_NAME"
+        echo "  expected rule: $DT_RULE_SCRIPT_NAME"
         while IFS= read -r base; do
           [[ -n "$base" ]] || continue
-          local menu="$base/Menu/Compress PDF Now.scpt"
-          local rule="$base/Smart Rules/Compress PDF (Smart Rule).scpt"
+          local menu="$base/Menu/$DT_MENU_SCRIPT_NAME"
+          local rule="$base/Smart Rules/$DT_RULE_SCRIPT_NAME"
           [[ -f "$menu" ]] && echo "  OK      $menu" || true
           [[ -f "$rule" ]] && echo "  OK      $rule" || true
         done < <(dt_target_dirs)

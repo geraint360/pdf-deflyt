@@ -15,7 +15,8 @@ set -o pipefail
 #
 # For ICC profile image support:
 #   - ImageMagick is required (brew install imagemagick)
-#   - Helper script pdf-deflyt-image-recompress must be in same directory
+#   - Helper script pdf-deflyt-image-recompress is preferred from ~/bin,
+#     then the script directory, then the current directory, then PATH
 #   - PyMuPDF is prepared during installation when possible
 
 usage() {
@@ -35,7 +36,8 @@ Presets:
   -p extreme    Maximum compression, smaller files (≈144dpi, JPEG Q68)
   -p lossless   Structure-only, no image recompression (ultra-safe)
   (Helpers: `pdf-deflyt-image-recompress` uses PyMuPDF from the installer-prepared
-  environment when available.)
+  environment when available. Lookup order: `PDF_DEFLYT_HELPER`, `~/bin`,
+  alongside this script, current directory, then `PATH`.)
 
 Common Options:
   --inplace            Replace originals (creates automatic .bak backup)
@@ -93,6 +95,8 @@ Output Control:
 Notes:
   - pdf-deflyt always preserves metadata and timestamps
   - pdf-deflyt always produces deterministic output
+  - ICC helper lookup order: `PDF_DEFLYT_HELPER`, `~/bin`, script directory,
+    current directory, then `PATH`
   - For most users, the basic options are sufficient
 EOF
   exit 2
@@ -303,6 +307,102 @@ choose_work_tmpdir() {
     return 0
   fi
   return 1
+}
+
+hash_string() {
+  local value="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$value" | sha256sum | awk '{print $1}'
+  else
+    printf '%s' "$value" | shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+resolve_icc_helper() {
+  if [[ -n "$PDF_DEFLYT_HELPER" && -x "$PDF_DEFLYT_HELPER" ]]; then
+    printf '%s' "$PDF_DEFLYT_HELPER"
+    return 0
+  fi
+
+  if [[ -x "$HOME/bin/pdf-deflyt-image-recompress" ]]; then
+    printf '%s' "$HOME/bin/pdf-deflyt-image-recompress"
+    return 0
+  fi
+
+  local this="${0:A}" 2>/dev/null || this="$0"
+  local script_dir="${this:h}"
+  if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
+    printf '%s' "$script_dir/pdf-deflyt-image-recompress"
+    return 0
+  fi
+  if [[ -x "./pdf-deflyt-image-recompress" ]]; then
+    printf '%s' "./pdf-deflyt-image-recompress"
+    return 0
+  fi
+
+  local helper=""
+  if helper="$(command -v pdf-deflyt-image-recompress 2>/dev/null)"; then
+    printf '%s' "$helper"
+    return 0
+  fi
+
+  return 1
+}
+
+acquire_input_lock() {
+  local input="$1" lock_root lock_key lock_dir pid_file stale_pid
+  lock_root="${CACHE_DIR}/locks"
+  mkdir -p "$lock_root" 2>/dev/null || return 1
+  lock_key="$(hash_string "$input")"
+  lock_dir="$lock_root/$lock_key"
+  pid_file="$lock_dir/pid"
+
+  if mkdir "$lock_dir" 2>/dev/null; then
+    printf '%s\n' "$$" > "$pid_file"
+    printf '%s\n' "$lock_dir"
+    return 0
+  fi
+
+  if [[ -f "$pid_file" ]]; then
+    stale_pid="$(/usr/bin/head -n1 "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$stale_pid" ]] && ! kill -0 "$stale_pid" 2>/dev/null; then
+      rm -rf "$lock_dir" 2>/dev/null || true
+      if mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s\n' "$$" > "$pid_file"
+        printf '%s\n' "$lock_dir"
+        return 0
+      fi
+    fi
+  fi
+
+  return 1
+}
+
+preflight_paths() {
+  local input="$1" out_req="$2" inplace="$3"
+  local target_dir probe_dir
+
+  if [[ ! -r "$input" ]]; then
+    log_error "Input PDF is not readable: $input"
+    return 1
+  fi
+
+  if [[ "$inplace" == true ]]; then
+    target_dir="$(dirname "$input")"
+  elif [[ -n "$out_req" ]]; then
+    target_dir="$(dirname "$out_req")"
+  else
+    target_dir="$(dirname "$input")"
+  fi
+
+  probe_dir="$target_dir/.pdf-deflyt.preflight.$$.$RANDOM"
+  if ! mkdir "$probe_dir" 2>/dev/null; then
+    log_error "Target directory is not writable: $target_dir"
+    return 1
+  fi
+  rmdir "$probe_dir" 2>/dev/null || rm -rf "$probe_dir" 2>/dev/null || true
+
+  return 0
 }
 
 # Validate password file
@@ -855,29 +955,9 @@ gs_text_only_pass() {
 python_recompress_images() {
   local in="$1" out="$2" jpegq="$3" c_res="$4" g_res="$5"
 
-  # 1) If caller provided an explicit helper path, use it
-  if [[ -n "$PDF_DEFLYT_HELPER" && -x "$PDF_DEFLYT_HELPER" ]]; then
-    helper="$PDF_DEFLYT_HELPER"
-  else
-    local helper=""
-    # 2) Prefer the installed helper next to the user's bin copy.
-    if [[ -x "$HOME/bin/pdf-deflyt-image-recompress" ]]; then
-      helper="$HOME/bin/pdf-deflyt-image-recompress"
-    else
-      # 3) Resolve this script's directory in zsh reliably (works in Shortcuts)
-      local this="${0:A}" 2>/dev/null || this="$0"
-      local script_dir="${this:h}"
-      # 4) Search order: alongside script, then CWD, then PATH
-      if [[ -x "$script_dir/pdf-deflyt-image-recompress" ]]; then
-        helper="$script_dir/pdf-deflyt-image-recompress"
-      elif [[ -x "./pdf-deflyt-image-recompress" ]]; then
-        helper="./pdf-deflyt-image-recompress"
-      elif helper="$(command -v pdf-deflyt-image-recompress 2>/dev/null)"; then
-        :
-      else
-        return 1
-      fi
-    fi
+  local helper
+  if ! helper="$(resolve_icc_helper)"; then
+    return 1
   fi
 
   local verbose_flag=""
@@ -1010,6 +1090,24 @@ process_one() {
     return 2
   fi
 
+  if ! preflight_paths "$orig" "$OUT_REQ" "$INP"; then
+    return 2
+  fi
+
+  local lock_dir=""
+  if lock_dir="$(acquire_input_lock "$orig")"; then
+    setopt localtraps
+    trap "rm -rf '$lock_dir' 2>/dev/null || true" EXIT INT TERM
+    if [[ -n "${PDF_DEFLYT_TEST_LOCK_HOLD:-}" && "${PDF_DEFLYT_TEST_LOCK_HOLD:-0}" != 0 ]]; then
+      local cleanup_lock_dir="$lock_dir"
+      trap "rm -rf '$cleanup_lock_dir' 2>/dev/null || true" EXIT INT TERM
+      sleep "${PDF_DEFLYT_TEST_LOCK_HOLD}"
+    fi
+  else
+    log "SKIP (locked): ${orig##*/} is already being processed"
+    return 0
+  fi
+
   local dir="$(dirname "$IN")"
   local work_tmpdir
   work_tmpdir="$(choose_work_tmpdir)" || {
@@ -1029,6 +1127,7 @@ process_one() {
     # Clean up all temp files, including intermediate files from failed operations
     rm -f "${tmp3}.w" "${tmp3}.c" 2>/dev/null || true
     rm -rf "$work_tmpdir" 2>/dev/null || true
+    [[ -n "${lock_dir:-}" ]] && rm -rf "$lock_dir" 2>/dev/null || true
     # If decrypted file exists in this scope, clean it up too
     [[ -n "${dec:-}" && -f "$dec" ]] && rm -f "$dec" 2>/dev/null || true
   }
@@ -1331,10 +1430,13 @@ run_wrapper() {
 }
 
 if $INTERNAL_ONE; then
-  f="${FILES[1]}"; run_wrapper "$f" "" || true; exit 0
+  f="${FILES[1]}"
+  run_wrapper "$f" ""
+  exit $?
 fi
 if [[ -n "$OUT_SINGLE" ]]; then
-  run_wrapper "${FILES[1]}" "$OUT_SINGLE" || true; exit 0
+  run_wrapper "${FILES[1]}" "$OUT_SINGLE"
+  exit $?
 fi
 
 if (( JOBS > 1 )) && $PARALLEL_OK; then

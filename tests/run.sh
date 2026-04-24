@@ -45,8 +45,9 @@ cases_serial=()
 
 # 1) -o honored + basic compression for each preset
 for pre in light standard extreme lossless; do
+  in="$WORK_DIR/in-${pre}.pdf"
   out="$WORK_DIR/out-${pre}.pdf"
-  cases+=("o_${pre}::$ROOT/pdf-deflyt -p $pre \"$ASSETS_DIR/mixed.pdf\" -o \"$out\" && \
+  cases+=("o_${pre}::cp \"$ASSETS_DIR/mixed.pdf\" \"$in\" && $ROOT/pdf-deflyt -p $pre \"$in\" -o \"$out\" && \
            [[ -f \"$out\" ]] && echo ok")
 done
 
@@ -131,6 +132,122 @@ cases+=("tempdir_fallback::bash \"$BUILD_DIR/tempdir_fallback.sh\"")
 cases+=("dt_scripts_no_helper_ref::bash -lc '
   ! grep -R -n \"pdf-deflyt-dt-apply\" \"$ROOT/devonthink-scripts/src\" \"$ROOT/README.md\" \"$ROOT/scripts/install-pdf-deflyt.sh\"
 '")
+
+cat > "$BUILD_DIR/dt_names_body.sh" << 'DN'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+
+grep -Fq 'DT_MENU_SCRIPT := Compress PDF Now.scpt' "$ROOT/Makefile"
+grep -Fq 'DT_RULE_SCRIPT := Compress PDF (Smart Rule).scpt' "$ROOT/Makefile"
+grep -Fq 'cp -f "$(COMPILED_DIR)/$(DT_MENU_SCRIPT)" "$(DT_MENU)/$(DT_MENU_SCRIPT)"' "$ROOT/Makefile"
+grep -Fq 'cp -f "$(COMPILED_DIR)/$(DT_RULE_SCRIPT)" "$(DT_RULES)/$(DT_RULE_SCRIPT)"' "$ROOT/Makefile"
+grep -Fq 'osacompile -o "$menu_dir/$DT_MENU_SCRIPT_NAME"' "$ROOT/scripts/install-pdf-deflyt.sh"
+grep -Fq 'osacompile -o "$rules_dir/$DT_RULE_SCRIPT_NAME"' "$ROOT/scripts/install-pdf-deflyt.sh"
+grep -Fq 'installs the scripts under their original names' "$ROOT/README.md"
+grep -Fq 'Compress PDF Now' "$ROOT/README.md"
+grep -Fq 'Compress PDF (Smart Rule)' "$ROOT/README.md"
+DN
+chmod +x "$BUILD_DIR/dt_names_body.sh"
+cases_serial+=("dt_names::bash \"$BUILD_DIR/dt_names_body.sh\"")
+
+cat > "$BUILD_DIR/helper_precedence_body.sh" << 'HP'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+real_helper="${HOME}/bin/pdf-deflyt-image-recompress"
+[[ -x "$real_helper" ]] || { echo "missing installed helper: $real_helper"; exit 0; }
+
+sandbox="$WORK_DIR/helper-precedence"
+rm -rf "$sandbox"
+mkdir -p "$sandbox"
+cp "$ROOT/pdf-deflyt" "$sandbox/pdf-deflyt"
+
+cat > "$sandbox/pdf-deflyt-image-recompress" << EOF
+#!/usr/bin/env bash
+echo stale-helper > "$sandbox/stale-helper.invoked"
+exit 42
+EOF
+chmod +x "$sandbox/pdf-deflyt-image-recompress"
+
+fakehome="$WORK_DIR/helper-precedence-home"
+rm -rf "$fakehome"
+mkdir -p "$fakehome/bin"
+cat > "$fakehome/bin/pdf-deflyt-image-recompress" << EOF
+#!/usr/bin/env bash
+exec "$real_helper" "\$@"
+EOF
+chmod +x "$fakehome/bin/pdf-deflyt-image-recompress"
+
+out="$sandbox/out.pdf"
+HOME="$fakehome" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH" \
+  "$sandbox/pdf-deflyt" -p standard "$ASSETS_DIR/mixed.pdf" -o "$out" >/dev/null
+
+[ -f "$out" ] || { echo "missing output"; exit 1; }
+[ ! -f "$sandbox/stale-helper.invoked" ] || { echo "repo helper was used instead of HOME helper"; exit 1; }
+HP
+chmod +x "$BUILD_DIR/helper_precedence_body.sh"
+cases_serial+=("helper_precedence::bash \"$BUILD_DIR/helper_precedence_body.sh\"")
+
+cat > "$BUILD_DIR/preflight_writable_body.sh" << 'PW'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+ro="$WORK_DIR/read-only-out"
+rm -rf "$ro"
+
+set +e
+msg=$("$ROOT/pdf-deflyt" -p standard "$ASSETS_DIR/mixed.pdf" -o "$ro/out.pdf" 2>&1)
+status=$?
+set -e
+
+[ "$status" -ne 0 ] || { echo "expected failure for unwritable output dir"; exit 1; }
+echo "$msg" | grep -q 'Target directory is not writable'
+PW
+chmod +x "$BUILD_DIR/preflight_writable_body.sh"
+cases_serial+=("preflight_writable::bash \"$BUILD_DIR/preflight_writable_body.sh\"")
+
+cat > "$BUILD_DIR/lock_contention_body.sh" << 'LC'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+src="$WORK_DIR/lock-test.pdf"
+cp "$ASSETS_DIR/mixed.pdf" "$src"
+out="$WORK_DIR/lock-test-out.pdf"
+
+PDF_DEFLYT_TEST_LOCK_HOLD=8 "$ROOT/pdf-deflyt" -p standard "$src" -o "$out" >"$WORK_DIR/lock-holder.log" 2>&1 &
+holder_pid=$!
+sleep 1
+
+set +e
+msg=$("$ROOT/pdf-deflyt" -p standard "$src" -o "$out" 2>&1)
+status=$?
+set -e
+
+kill "$holder_pid" 2>/dev/null || true
+wait "$holder_pid" 2>/dev/null || true
+
+[ "$status" -eq 0 ] || { echo "contended run should skip cleanly"; echo "$msg"; exit 1; }
+echo "$msg" | grep -q 'SKIP (locked)'
+LC
+chmod +x "$BUILD_DIR/lock_contention_body.sh"
+cases_serial+=("lock_contention::bash \"$BUILD_DIR/lock_contention_body.sh\"")
 
 # 4) --inplace preserves mtime and reduces size (on imagey file)
 

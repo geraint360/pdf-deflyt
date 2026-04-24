@@ -307,6 +307,7 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 - **PyMuPDF** (prepared by the installer when available, or already present on the system)
 
 The helper script uses PyMuPDF from a prebuilt local virtual environment when the installer has created one. It does not create that environment on demand at runtime.
+`pdf-deflyt` prefers the installed helper from `~/bin` first, then falls back to the copy next to the main script, then to the current directory, then to `PATH`.
 
 ### What Happens Without ImageMagick?
 
@@ -473,6 +474,17 @@ If you are updating from an older install, remove any leftover prefixed copies f
 - Choose your conditions (e.g. Kind is PDF, Size > 300 KB, etc.).
 - Under **Perform the following actions**, select **Apply Script…** and choose **Compress PDF (Smart Rule)**.
 - For unattended operation, use `--inplace --min-gain 1` for safety, or customise the flags in the AppleScript source.
+
+### Manual Smoke Test
+
+If you want to sanity-check a fresh install without a clean machine, this is the shortest useful sequence:
+
+1. Run `make install`.
+2. Run `make install-dt`.
+3. Open DEVONthink and trigger `Compress PDF Now` on a known large PDF.
+4. Confirm the file size changes and `~/Library/Logs/pdf-deflyt.log` records a `Done` line.
+
+If the size does not change, check the log first. It should usually tell you whether the script kept the original, failed to refresh the UI, or could not reach the helper.
 
 **Recommended Defaults**
 
