@@ -17,7 +17,7 @@ jobs:
         id: install-macos
         run: |
           brew update
-          brew install ghostscript pdfcpu qpdf mupdf-tools exiftool poppler coreutils parallel imagemagick zsh
+          brew install ghostscript pdfcpu qpdf mupdf-tools exiftool poppler coreutils parallel imagemagick zsh jpeg-turbo jbig2enc
           pdfcpu version
 
       - name: Install linters (macOS)
@@ -52,30 +52,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies (Linux)
+      # Same Homebrew toolchain as macOS (current versions), not the older distro packages
+      - name: Install dependencies (Linux, Homebrew)
         id: install-linux
-        env:
-          PDFCPU_VER: v0.7.1
         run: |
           set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ghostscript qpdf mupdf-tools poppler-utils exiftool parallel imagemagick curl golang-go zsh
-          # Install pdfcpu via go install to avoid fragile archive downloads
-          export GOBIN=/usr/local/bin
-          go install github.com/pdfcpu/pdfcpu/cmd/pdfcpu@latest
-          pdfcpu version
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          echo "/home/linuxbrew/.linuxbrew/sbin" >> "$GITHUB_PATH"
+          brew update
+          brew install ghostscript pdfcpu qpdf mupdf-tools exiftool poppler coreutils parallel imagemagick zsh jpeg-turbo jbig2enc python shellcheck shfmt
+          pdfcpu version; qpdf --version | head -1; magick -version | head -1
 
       - name: Make script executable
         run: chmod +x pdf-deflyt
-
-      - name: Install linters (Linux)
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-          # shfmt (golang based)
-          curl -sSLo /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64
-          sudo chmod +x /usr/local/bin/shfmt
 
       - name: Lint
         run: make lint
