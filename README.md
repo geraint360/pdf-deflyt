@@ -456,11 +456,25 @@ pdf-deflyt --debug icc-document.pdf
 
 #### Typical Performance
 
-Savings and run time depend heavily on the content (scan resolution, image count, how the
-PDF was produced), so measure on your own documents. One thing that is roughly constant is
-a fixed per-file overhead from tool start-up and the safety checks: on an Apple M2 Pro, even
-a single-page file takes about **1.5 s** with the lossy presets and **0.9 s** with
-`lossless`. For large batches, use `--jobs`.
+Measured with 2.5.1 on an Apple M2 Pro, on real documents from a DEVONthink database
+(savings per preset; time is wall-clock for `standard`):
+
+| Document | Pages | Size | light | standard | extreme | lossless | Time |
+|----------|-------|------|-------|----------|---------|----------|------|
+| Magazine article (iOS export, full-page photos) | 7 | 8.3 MB | 8% | 46% | 69% | 1% | 12 s |
+| Travel article, web clip | 1 (long) | 4.7 MB | 64% | 81% | 88% | 0% | 9 s |
+| Web clip, already compressed by PDF Squeezer | 1 (long) | 3.5 MB | 0% | 3% | 6% | 0% | 9 s |
+| Web clip, already compressed by PDF Squeezer | 1 (long) | 7.2 MB | 0% | 3% | 6% | 0% | 20 s |
+
+Already-optimized files barely shrink: their images are at 120 ppi, below every preset's
+target, so nothing is downsampled, and the small gain comes only from re-encoding the
+JPEGs at the preset's quality. `0%` means the original was kept unchanged.
+`lossless` gains come from Huffman-optimizing unoptimized JPEGs and from JBIG2 on
+black-and-white scans, so they show up on scanner output rather than on web clips.
+
+There is also a fixed per-file overhead from tool start-up and the safety checks: about
+1.5 s with the lossy presets and 0.9 s with `lossless`, even for a one-page file.
+For large batches, use `--jobs`.
 
 *Run your own benchmarks:*
 ```bash
