@@ -146,6 +146,7 @@ def recompress_pdf_images(input_path, output_path, quality=75, verbose=False, co
         if verbose:
             print(f"Processing {len(doc)} pages...", file=sys.stderr)
 
+        done_xrefs = set()  # images shared across pages are only recompressed once
         for page_num in range(len(doc)):
             page = doc[page_num]
             image_list = page.get_images(full=True)
@@ -156,6 +157,9 @@ def recompress_pdf_images(input_path, output_path, quality=75, verbose=False, co
             for img_index, img in enumerate(image_list):
                 xref = img[0]
                 smask_xref = img[1] if len(img) > 1 else 0  # Soft mask reference
+                if xref in done_xrefs:
+                    continue
+                done_xrefs.add(xref)
 
                 try:
                     # Skip images with soft masks (transparency) - PyMuPDF's insert_image()
@@ -224,12 +228,15 @@ def recompress_pdf_images(input_path, output_path, quality=75, verbose=False, co
                             print(f"      Kept original (would be larger)", file=sys.stderr)
                         continue
 
-                    # Delete the old image (we already have img_rects from earlier)
-                    page.delete_image(xref)
-                    
-                    # Insert the new JPEG at each location where the old image was
-                    for rect in img_rects:
-                        page.insert_image(rect, stream=new_image_bytes, keep_proportion=True)
+                    if hasattr(page, "replace_image"):
+                        # PyMuPDF >= 1.21: swap the image stream in place, keeping every
+                        # placement (on all pages) exactly as it was
+                        page.replace_image(xref, stream=new_image_bytes)
+                    else:
+                        # Older PyMuPDF: delete and re-insert at each placement on this page
+                        page.delete_image(xref)
+                        for rect in img_rects:
+                            page.insert_image(rect, stream=new_image_bytes, keep_proportion=True)
                     
                     if verbose:
                         reduction = (1 - len(new_image_bytes)/len(image_bytes)) * 100

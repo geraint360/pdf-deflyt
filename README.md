@@ -170,8 +170,12 @@ pdf-deflyt [options] <file-or-dir>...
 - `--quiet`  
   Suppress the usual “arrow” output line for each processed file.
 
-- `--version`, `--help`  
+- `--version`, `--help`
   Show version or usage.
+
+**Exit status:** `0` when every file was processed (or deliberately kept/skipped in a batch);
+`1` if any file failed, or if a single `-o` output could not be written (for example the
+input was encrypted, invalid, or already being processed by another run).
 
 **Output naming:**  
 If neither `-o` nor `--inplace` is used, results are written next to the input as: `*_compressed.pdf`.
@@ -295,10 +299,11 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 ### How It Works
 
 `pdf-deflyt` automatically:
-1. Detects FlateDecode-compressed images with ICC profiles
-2. Uses the `pdf-deflyt-image-recompress` helper script
-3. Converts images via ImageMagick (preserves ICC profiles)
-4. Reinserts properly-compressed images into the PDF
+1. Detects images with ICC profiles
+2. Tries the `pdf-deflyt-image-recompress` helper (ImageMagick recompression, ICC preserved)
+3. Also tries Ghostscript, which keeps the ICC colour space
+4. Uses the smallest result that keeps the page count and passes a low-resolution
+   visual comparison against the original
 
 ### Requirements
 
@@ -311,10 +316,10 @@ The helper script uses PyMuPDF from a prebuilt local virtual environment when th
 
 ### What Happens Without ImageMagick?
 
-If ImageMagick is not installed:
-- PDFs with ICC profile images will use **structural compression only** (1-5% typical savings)
-- A warning message will be displayed
-- Install ImageMagick to enable full compression: `brew install imagemagick` (macOS) or `sudo apt install imagemagick` (Linux)
+If ImageMagick (or PyMuPDF) is not available:
+- The helper is skipped and Ghostscript alone recompresses ICC images
+- The visual comparison safety check is also skipped (it uses ImageMagick), so installing
+  ImageMagick is still recommended: `brew install imagemagick` (macOS) or `sudo apt install imagemagick` (Linux)
 
 ### Supported ImageMagick Versions
 
@@ -326,8 +331,8 @@ If ImageMagick is not installed:
 ```bash
 # PDF with ICC profiles - automatically handled
 pdf-deflyt photo-portfolio.pdf
-# NOTICE: Detected ICC profile images, using ImageMagick-based compression
 # → photo-portfolio_compressed.pdf  (89.4% smaller)  [ok]
+# (use --verbose to see which candidates were tried or rejected)
 
 # Verify helper is working
 pdf-deflyt-image-recompress --help
@@ -368,8 +373,11 @@ pdf-deflyt --debug icc-document.pdf
    - Always produces deterministic output for reproducibility
    - Always preserves metadata and timestamps
 
-6. **Safety rails**  
-   - `--min-gain` keeps the original unless savings meet your threshold.  
+6. **Safety rails**
+   - Several candidates are produced (structural only, Ghostscript, and the ICC helper when
+     relevant); each must keep the page count, and lossy ones must pass a low-resolution
+     visual comparison with the original. The smallest valid candidate wins.
+   - `--min-gain` keeps the original unless savings meet your threshold.
    - In `--inplace` mode, the original is only replaced if the new file qualifies.
 
 ### Preset guide (ballpark)
@@ -556,8 +564,12 @@ If the size does not change, check the log first. It should usually tell you whe
 - **Images look corrupted or have wrong colors**  
   This can happen with ICC profile images if ImageMagick is not installed. Install ImageMagick and re-run compression.  
 
-- **"NOTICE: Detected ICC profile images"**  
-  This is informational - your PDF has complex color profiles. Compression will take slightly longer but colors will be preserved. If you see "WARNING: ICC helper unavailable", rerun the installer to prepare PyMuPDF and make sure ImageMagick is installed.
+- **pdfcpu says "configuration reset required"**
+  pdfcpu 0.16 refuses to run with an old config file. `pdf-deflyt` runs pdfcpu with its
+  config disabled, so it is unaffected; run `pdfcpu config reset` if you use pdfcpu directly.
+
+- **ICC helper unavailable** (shown with `--verbose`)
+  Ghostscript is used on its own; rerun the installer to prepare PyMuPDF if you also want the helper.
 
 
 ---

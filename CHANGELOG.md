@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-24
+
+### Fixed
+- Works with pdfcpu 0.16+: the removed `-quiet` flag, the mandatory config migration
+  and the refusal to overwrite existing files made every structural pass fail silently
+- Batches of two or more files: the file list was joined into one bogus path
+- `--jobs N` parallel mode: workers received no file and ignored all options
+  (preset, `--inplace`, `--log`, ...); a batch summary is now printed in parallel mode too
+- `--memory-limit` crashed (`parse_bytes` was called before it was defined)
+- `--debug` captured its own log line into the temp-directory path
+- In-place compression lost the original's modification time and set permissions to 600;
+  it now keeps mode, extended attributes (e.g. Finder tags) and timestamps, and writes atomically
+- Concurrent runs that only read the same input (e.g. `-o` to different files) were
+  skipped as "locked"; locks are now taken on the destination
+- Non-PDF input "succeeded" and was copied to the output; it now fails with exit status 1
+- Batch summary never printed (awk syntax error); exit status is now 1 when any file fails
+- `--` dropped every argument after it; `-p/-o` long forms `--preset/--output` now work
+- Dry-run used different JPEG targets from the real run
+- DEVONthink scripts: shared temp output between concurrent runs, and successful
+  replacements logged as failures (`r` was not passed to `runCompression`)
+- Test runner: a failure in the parallel phase silently skipped every serial test
+
+### Changed
+- Compression is now candidate-based: structural, Ghostscript and (for ICC images) the
+  ImageMagick helper are all tried, each result is finalized with pdfcpu/mutool/qpdf, and
+  the smallest one that keeps the page count and passes a low-resolution visual
+  comparison is used
+- A single low-resolution image no longer disables image recompression for the whole
+  document (a typical letterhead-logo + photo PDF went from 0% to ~92% savings)
+- ICC profile images: when the helper is unavailable, Ghostscript (which keeps the ICC
+  colour space) is used instead of falling back to structural-only compression
+- ICC helper replaces images in place (`replace_image`) instead of delete + reinsert,
+  which left a 1×1 placeholder image on every page
+- `--jobs` defaults to the number of CPU cores, as documented
+- `--log` writes a header row and quotes paths containing commas or quotes
+- Added `-q/--quality N` to override the preset's JPEG quality
+- Removed the per-file analysis cache (it was keyed on temp paths and never hit)
+
 ### Added
 - Two-tier help system (`--help` for common options, `--help-advanced` for expert features)
 - Automatic algorithm selection based on PDF content (images vs text-only)

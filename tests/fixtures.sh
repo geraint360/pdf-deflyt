@@ -117,6 +117,17 @@ create_fixtures() {
 
   # Small structural PDF (almost no images)
   mkpdf_blank 400 400 "$ASSETS_DIR/structural.pdf"
+
+  # Realistic mixed-resolution document: a 400ppi photo page plus a small 72ppi logo
+  # page. A single low-res image must not disable recompression of the rest.
+  if _have magick && _have qpdf; then
+    magick -seed 42 -size 1500x1950 plasma:fractal -blur 0x1 -resize 3000x3900 \
+      -density 400 -units PixelsPerInch -compress JPEG -quality 92 "$BUILD_DIR/photo400.pdf"
+    magick -size 120x60 gradient:red-yellow -density 72 -units PixelsPerInch \
+      -compress JPEG "$BUILD_DIR/logo72.pdf"
+    qpdf --empty --pages "$BUILD_DIR/photo400.pdf" "$BUILD_DIR/logo72.pdf" -- "$ASSETS_DIR/mixed_res.pdf"
+    rm -f "$BUILD_DIR/photo400.pdf" "$BUILD_DIR/logo72.pdf"
+  fi
 }
 
 create_fixtures

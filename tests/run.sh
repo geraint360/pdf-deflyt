@@ -243,7 +243,9 @@ set -e
 kill "$holder_pid" 2>/dev/null || true
 wait "$holder_pid" 2>/dev/null || true
 
-[ "$status" -eq 0 ] || { echo "contended run should skip cleanly"; echo "$msg"; exit 1; }
+# The requested output was not written, so a single-file -o run must report failure
+# (callers such as the DEVONthink scripts must not pick up a stale/foreign output).
+[ "$status" -ne 0 ] || { echo "contended -o run must exit non-zero"; echo "$msg"; exit 1; }
 echo "$msg" | grep -q 'SKIP (locked)'
 LC
 chmod +x "$BUILD_DIR/lock_contention_body.sh"
@@ -761,7 +763,10 @@ chmod +x "$BUILD_DIR/sidecar_body.sh"
 cases+=("sidecar_sha256::bash \"$BUILD_DIR/sidecar_body.sh\"")
 
 # (M) CSV logging with --log option
-if "$ROOT/pdf-deflyt" --help 2>&1 | grep -q -- '--log'; then
+if {
+  "$ROOT/pdf-deflyt" --help
+  "$ROOT/pdf-deflyt" --help-advanced
+} 2>&1 | grep -q -- '--log'; then
   cat > "$BUILD_DIR/csv_body.sh" << 'CSV'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -828,6 +833,71 @@ else
   echo "Skipping CSV logging tests (no --log support detected)" >&2
 fi
 
+# (O) Regression tests for batch / parallel / robustness fixes
+cat > "$BUILD_DIR/regressions_body.sh" << 'REG'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1"; }
+mtime() { stat -f%m "$1" 2>/dev/null || stat -c%Y "$1"; }
+mode() { stat -f%Lp "$1" 2>/dev/null || stat -c%a "$1"; }
+
+d="$WORK_DIR/regressions"
+rm -rf "$d"; mkdir -p "$d"
+
+# Multi-file batch, sequential: every input gets an output
+cp "$ASSETS_DIR/gray.pdf" "$d/a.pdf"; cp "$ASSETS_DIR/rgb.pdf" "$d/b.pdf"
+"$ROOT/pdf-deflyt" --jobs 1 -p light "$d/a.pdf" "$d/b.pdf" > /dev/null 2>&1 || fail "sequential batch exited non-zero"
+[ -f "$d/a_compressed.pdf" ] && [ -f "$d/b_compressed.pdf" ] || fail "sequential batch missed a file"
+
+# Parallel workers must receive the file and honour the options (preset, --log)
+mkdir -p "$d/par"; cp "$ASSETS_DIR/gray.pdf" "$d/par/c.pdf"; cp "$ASSETS_DIR/rgb.pdf" "$d/par/e f.pdf"
+"$ROOT/pdf-deflyt" --jobs 2 -p lossless --log "$d/par.csv" "$d/par" > /dev/null 2>&1 || fail "parallel batch exited non-zero"
+[ -f "$d/par/c_compressed.pdf" ] && [ -f "$d/par/e f_compressed.pdf" ] || fail "parallel batch missed a file"
+[ "$(grep -c ',lossless,' "$d/par.csv")" -eq 2 ] || { cat "$d/par.csv" >&2; fail "parallel workers ignored the preset"; }
+
+# --memory-limit parses
+"$ROOT/pdf-deflyt" --memory-limit 256M "$ASSETS_DIR/rgb.pdf" -o "$d/mem.pdf" > /dev/null || fail "--memory-limit failed"
+[ -f "$d/mem.pdf" ] || fail "--memory-limit produced no output"
+
+# Options after -- are inputs
+"$ROOT/pdf-deflyt" -p light -o "$d/dd.pdf" -- "$ASSETS_DIR/gray.pdf" > /dev/null || fail "-- handling"
+[ -f "$d/dd.pdf" ] || fail "-- handling produced no output"
+
+# A non-PDF must fail with a non-zero status and write nothing
+echo "not a pdf" > "$d/junk.pdf"
+if "$ROOT/pdf-deflyt" "$d/junk.pdf" -o "$d/junk_out.pdf" > /dev/null 2>&1; then fail "junk input exited 0"; fi
+[ ! -e "$d/junk_out.pdf" ] || fail "junk input produced an output file"
+
+# In-place keeps permissions and the exact modification time
+cp "$ASSETS_DIR/mixed.pdf" "$d/ip.pdf"; chmod 640 "$d/ip.pdf"; touch -t 202001021234 "$d/ip.pdf"
+before=$(mtime "$d/ip.pdf")
+"$ROOT/pdf-deflyt" -p extreme --inplace "$d/ip.pdf" > /dev/null || fail "inplace exited non-zero"
+[ "$(mtime "$d/ip.pdf")" = "$before" ] || fail "inplace changed mtime"
+[ "$(mode "$d/ip.pdf")" = "640" ] || fail "inplace changed mode to $(mode "$d/ip.pdf")"
+
+# Concurrent runs reading the same input but writing different outputs all succeed
+for i in 1 2 3; do "$ROOT/pdf-deflyt" -p light "$ASSETS_DIR/gray.pdf" -o "$d/conc$i.pdf" > /dev/null 2>&1 & done
+wait
+for i in 1 2 3; do [ -f "$d/conc$i.pdf" ] || fail "concurrent run $i was skipped"; done
+
+# Mixed-resolution document: one small low-res logo must not block recompression
+if [ -f "$ASSETS_DIR/mixed_res.pdf" ]; then
+  "$ROOT/pdf-deflyt" -p standard "$ASSETS_DIR/mixed_res.pdf" -o "$d/mixed_res.pdf" > /dev/null || fail "mixed_res failed"
+  a=$(size "$ASSETS_DIR/mixed_res.pdf"); b=$(size "$d/mixed_res.pdf")
+  [ "$b" -lt $((a / 2)) ] || fail "mixed_res only shrank $a -> $b"
+  [ "$(pdfinfo "$d/mixed_res.pdf" | awk '/^Pages:/{print $2}')" = 2 ] || fail "mixed_res lost pages"
+fi
+REG
+chmod +x "$BUILD_DIR/regressions_body.sh"
+cases+=("regressions::bash \"$BUILD_DIR/regressions_body.sh\"")
+
 # ---------- RUN PARALLEL ----------
 run_one() {
   # Keep each case as a single opaque string; write to a temp script and run it.
@@ -857,7 +927,8 @@ echo "Running ${#cases[@]} tests…"
 if command -v parallel > /dev/null 2>&1; then
   # Use NUL-delimited input to avoid any quoting issues.
   printf '%s\0' "${cases[@]}" \
-    | SHELL=/bin/bash PARALLEL='--will-cite' parallel --no-notice -0 -j "$(sysctl -n hw.ncpu 2> /dev/null || echo 4)" run_one {}
+    | SHELL=/bin/bash PARALLEL='--will-cite' parallel --no-notice -0 -j "$(sysctl -n hw.ncpu 2> /dev/null || echo 4)" run_one {} \
+    || true # failures are recorded in $BUILD_DIR/failed; still run the serial phase
 else
   # Deterministic sequential fallback (no DIY background job juggling)
   for c in "${cases[@]}"; do

@@ -38,7 +38,8 @@ end sizeOfFile
 on tempDir()
 	set fm to current application's NSFileManager's defaultManager()
 	set rootDir to current application's NSTemporaryDirectory() as text
-	set workDir to rootDir & "pdf-deflyt.dt"
+	-- Unique per run: concurrent Smart Rule invocations must never share an output file
+	set workDir to rootDir & "pdf-deflyt.dt." & ((current application's NSUUID's UUID()'s UUIDString()) as text)
 	set ok to fm's createDirectoryAtPath:workDir withIntermediateDirectories:true attributes:(missing value) |error|:(missing value)
 	if ok is false then error "Failed to create temp directory: " & workDir
 	return workDir
@@ -69,7 +70,7 @@ on refreshRecord(r)
 	end try
 end refreshRecord
 
-on runCompression(sourcePath, recordName, tag)
+on runCompression(r, sourcePath, recordName, tag)
 	set workDir to my tempDir()
 	set outputPath to workDir & "/output.pdf"
 	set sourceDir to (current application's NSString's stringWithString:sourcePath)'s stringByDeletingLastPathComponent() as text
@@ -83,12 +84,12 @@ on runCompression(sourcePath, recordName, tag)
 		set inputBytes to my sizeOfFile(sourcePath)
 		set outputBytes to my sizeOfFile(outputPath)
 		if outputBytes is greater than or equal to inputBytes then
-			my appendLog(tag, "FAIL on " & recordName & ": output not smaller (" & inputBytes & " -> " & outputBytes & "); keeping original")
+			my appendLog(tag, "Skipped " & recordName & ": no worthwhile savings (" & inputBytes & " -> " & outputBytes & "); keeping original")
 			my removePath(workDir)
 			return false
 		end if
 
-		set stagePath to sourceDir & "/.pdf-deflyt.stage.pdf"
+		set stagePath to sourceDir & "/.pdf-deflyt.stage." & ((current application's NSUUID's UUID()'s UUIDString()) as text) & ".pdf"
 		set status to my runTask("/bin/cp", {"-f", outputPath, stagePath})
 		if status is not 0 then error "Failed to stage output (" & status & ")"
 		my replaceFile(stagePath, sourcePath)
@@ -113,7 +114,7 @@ on compressRecord(r)
 	end tell
 	set sourcePath to POSIX path of pth
 	my appendLog("Compress Now", "Starting " & recordName & " -> " & sourcePath)
-	my runCompression(sourcePath, recordName, "Compress Now")
+	my runCompression(r, sourcePath, recordName, "Compress Now")
 end compressRecord
 
 	try
