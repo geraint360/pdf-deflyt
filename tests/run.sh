@@ -898,6 +898,98 @@ REG
 chmod +x "$BUILD_DIR/regressions_body.sh"
 cases+=("regressions::bash \"$BUILD_DIR/regressions_body.sh\"")
 
+# 14) Preservation and lossless passes: features, metadata, signatures, text, timeouts,
+#     Huffman-optimized JPEGs and JBIG2 for 1-bit scans
+cat > "$BUILD_DIR/preserve_body.sh" << 'PRS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1"; }
+have() { command -v "$1" > /dev/null 2>&1; }
+same_pixels() { [ "$(magick compare -metric AE "$1" "$2" null: 2>&1 | awk '{print $1}')" = 0 ]; }
+enc() { pdfimages -list "$1" 2>/dev/null | awk 'NR>2{print $9}' | sort -u | tr '\n' ' '; }
+fields() { qpdf --json=2 --json-key=acroform "$1" 2>/dev/null | grep -c '"fullname": "customer"' || true; }
+
+d="$WORK_DIR/preserve"
+rm -rf "$d"; mkdir -p "$d"
+
+# Form fields, attachment, bookmark, text layer and metadata survive a lossy preset
+if [ -f "$ASSETS_DIR/form_mixed.pdf" ]; then
+  "$ROOT/pdf-deflyt" -p standard "$ASSETS_DIR/form_mixed.pdf" -o "$d/form.pdf" > /dev/null || fail "form run failed"
+  [ "$(fields "$d/form.pdf")" -ge 1 ] || fail "form field lost"
+  qpdf --list-attachments "$d/form.pdf" | grep -q notes.txt || fail "attachment lost"
+  outlines=$(qpdf --json=2 --json-key=outlines "$d/form.pdf")
+  echo "$outlines" | grep -q '"title": "Agreement"' || fail "bookmark lost"
+  pdftotext "$d/form.pdf" - | grep "reference 4711" > /dev/null || fail "text layer lost"
+  pdfinfo -isodates "$d/form.pdf" | grep "CreationDate: *2020-01-02T03:04:05" > /dev/null || fail "creation date changed"
+  pdfinfo "$d/form.pdf" | grep "^Title: *Form fixture" > /dev/null || fail "title changed"
+fi
+
+# Original metadata is restored after Ghostscript rewrites the file
+# (exiftool -o combined with -overwrite_original moves the source, so edit a copy)
+cp "$ASSETS_DIR/mixed.pdf" "$d/meta-in.pdf"
+exiftool -q -overwrite_original -Title="Meta fixture" -CreateDate="2019:05:06 07:08:09" "$d/meta-in.pdf" > /dev/null 2>&1 || true
+pdfinfo "$d/meta-in.pdf" | grep "^Title: *Meta fixture" > /dev/null || fail "could not set fixture metadata"
+"$ROOT/pdf-deflyt" -p extreme "$d/meta-in.pdf" -o "$d/meta.pdf" > /dev/null || fail "metadata run failed"
+[ "$(pdfinfo -isodates "$d/meta-in.pdf" | grep -E '^(Title|CreationDate)')" = \
+  "$(pdfinfo -isodates "$d/meta.pdf" | grep -E '^(Title|CreationDate)')" ] || fail "metadata not restored"
+
+# Digitally signed PDFs are passed through byte-for-byte
+cat > "$d/sig-raw.pdf" << 'RAW'
+%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >> endobj
+4 0 obj << /Length 44 >> stream
+BT /F1 24 Tf 72 700 Td (Signed contract) Tj ET
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /Rect [0 0 0 0] /P 3 0 R /F 132 /V 6 0 R >> endobj
+6 0 obj << /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange [0 100 200 300] /Contents <3082000000> /M (D:20240101000000Z) >> endobj
+trailer << /Size 7 /Root 1 0 R >>
+%%EOF
+RAW
+qpdf "$d/sig-raw.pdf" "$d/signed.pdf" > /dev/null 2>&1 || [ -s "$d/signed.pdf" ] || fail "could not build signed fixture"
+msg=$("$ROOT/pdf-deflyt" -p extreme "$d/signed.pdf" -o "$d/signed-out.pdf" 2>&1) || fail "signed run exited non-zero"
+echo "$msg" | grep -qi "signed" || fail "no notice for signed PDF: $msg"
+cmp -s "$d/signed.pdf" "$d/signed-out.pdf" || fail "signed PDF was modified"
+
+# A hung tool is stopped by --timeout and the file still gets a (structural) result
+if have timeout || have gtimeout; then
+  mkdir -p "$d/shim"
+  printf '#!/bin/sh\nsleep 60\n' > "$d/shim/gs"; chmod +x "$d/shim/gs"
+  start=$(date +%s)
+  PATH="$d/shim:$PATH" "$ROOT/pdf-deflyt" --timeout 2 -p standard "$ASSETS_DIR/rgb.pdf" -o "$d/timeout.pdf" > /dev/null 2>&1 || true
+  [ $(( $(date +%s) - start )) -lt 40 ] || fail "--timeout did not stop the hung step"
+  [ -f "$d/timeout.pdf" ] || fail "--timeout run produced no output"
+fi
+
+# Unoptimized JPEGs get Huffman-optimized losslessly (identical pixels, smaller file)
+if have jpegtran && have magick && [ -f "$ASSETS_DIR/jpeg_unopt.pdf" ]; then
+  "$ROOT/pdf-deflyt" -p lossless "$ASSETS_DIR/jpeg_unopt.pdf" -o "$d/jpeg.pdf" > /dev/null || fail "jpeg run failed"
+  [ "$(size "$d/jpeg.pdf")" -lt $(( $(size "$ASSETS_DIR/jpeg_unopt.pdf") * 97 / 100 )) ] || fail "jpeg not optimized"
+  pdfimages "$ASSETS_DIR/jpeg_unopt.pdf" "$d/ja"; pdfimages "$d/jpeg.pdf" "$d/jb"
+  same_pixels "$d/ja-000.ppm" "$d/jb-000.ppm" || fail "jpeg optimization changed pixels"
+fi
+
+# 1-bit scans are re-encoded as generic-region JBIG2 with identical pixels
+if have jbig2 && have magick && [ -f "$ASSETS_DIR/mono_scan.pdf" ]; then
+  "$ROOT/pdf-deflyt" -p lossless "$ASSETS_DIR/mono_scan.pdf" -o "$d/mono.pdf" > /dev/null || fail "mono run failed"
+  [ "$(enc "$d/mono.pdf")" = "jbig2 " ] || fail "mono scan not JBIG2: $(enc "$d/mono.pdf")"
+  [ "$(size "$d/mono.pdf")" -lt "$(size "$ASSETS_DIR/mono_scan.pdf")" ] || fail "JBIG2 not smaller"
+  pdfimages "$ASSETS_DIR/mono_scan.pdf" "$d/ma"; pdfimages "$d/mono.pdf" "$d/mb"
+  # Compare decoded pixels (PBM row padding bits are not part of the image)
+  same_pixels "$d/ma-000.pbm" "$d/mb-000.pbm" || fail "JBIG2 changed pixels"
+fi
+PRS
+chmod +x "$BUILD_DIR/preserve_body.sh"
+cases+=("preserve_features::bash \"$BUILD_DIR/preserve_body.sh\"")
+
 # ---------- RUN PARALLEL ----------
 run_one() {
   # Keep each case as a single opaque string; write to a temp script and run it.

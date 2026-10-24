@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-24
+
+### Added
+- Lossless JPEG optimization: JPEG streams are re-encoded with optimized Huffman tables
+  (`jpegtran`, from jpeg-turbo); pixels are unchanged and only smaller results are kept
+- Lossless JBIG2 for 1-bit scans (`jbig2enc`, generic region mode only): typically 30–50%
+  smaller than CCITT G4, with every converted image decoded and verified pixel-exact.
+  Rendering was checked in MuPDF, Poppler, Ghostscript and PDFKit (DEVONthink, Preview)
+- Feature-survival check: a candidate is rejected if it loses form fields or their values,
+  annotations or links, bookmarks, attachments or pages
+- Text-layer check: a candidate is rejected if fewer than 97% of the original's words
+  survive (protects OCR layers)
+- `--timeout SECS` (default 600): bounds every external tool call
+- Documents with form fields also get the in-place image recompression candidate, so they
+  still shrink when the Ghostscript result is rejected (81.7% on the form test fixture)
+- `jpegtran` and `jbig2` are reported by `--check-deps`; the installer installs them
+  (best effort)
+
+### Changed
+- The original Info dictionary and XMP metadata are restored verbatim on every output
+  (previously creation/modification dates and some fields were rewritten)
+- Digitally signed PDFs are left byte-for-byte untouched instead of being rewritten,
+  which invalidated their signatures
+- The visual check now samples up to 5 pages across the whole document instead of only
+  the first pages
+
+### Fixed
+- Ghostscript results silently dropped form fields and their values, and rewrote dates
+
 ## [2.4.0] - 2026-10-24
 
 ### Fixed

@@ -128,6 +128,43 @@ create_fixtures() {
     qpdf --empty --pages "$BUILD_DIR/photo400.pdf" "$BUILD_DIR/logo72.pdf" -- "$ASSETS_DIR/mixed_res.pdf"
     rm -f "$BUILD_DIR/photo400.pdf" "$BUILD_DIR/logo72.pdf"
   fi
+
+  if _have magick; then
+    # Black-and-white "scan" stored as CCITT G4, as most scanners produce
+    magick -seed 5 -size 1275x1650 plasma:fractal -blur 0x2 -resize 2550x3300 -threshold 50% \
+      -monochrome -density 300 -units PixelsPerInch -compress Group4 "$ASSETS_DIR/mono_scan.pdf"
+    # JPEG written without optimized Huffman tables (as Ghostscript and many scanners do)
+    magick -seed 9 -size 1000x1300 plasma:fractal -resize 2000x2600 -quality 85 \
+      -define jpeg:optimize-coding=false "$BUILD_DIR/unopt.jpg"
+    magick "$BUILD_DIR/unopt.jpg" -density 250 -units PixelsPerInch -compress JPEG \
+      -define jpeg:optimize-coding=false "$ASSETS_DIR/jpeg_unopt.pdf"
+    rm -f "$BUILD_DIR/unopt.jpg"
+  fi
+
+  # Interactive document: text layer, form field, bookmark, attachment and metadata on
+  # page 1, plus a high-resolution photo page that Ghostscript would recompress.
+  if _have qpdf && [ -f "$ASSETS_DIR/mixed_res.pdf" ]; then
+    cat > "$BUILD_DIR/form_raw.pdf" << 'RAW'
+%PDF-1.7
+1 0 obj << /Type /Catalog /Pages 2 0 R /Outlines 7 0 R /AcroForm << /Fields [5 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 6 0 R >> >> >> >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] /Resources << /Font << /F1 6 0 R >> >> >> endobj
+4 0 obj << /Length 75 >> stream
+BT /F1 18 Tf 72 720 Td (Customer agreement reference 4711 total 123.45) Tj ET
+endstream endobj
+5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (customer) /V (ACME Ltd) /Rect [72 600 300 620] /P 3 0 R /F 4 /DA (/Helv 12 Tf 0 g) >> endobj
+6 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
+7 0 obj << /Type /Outlines /First 8 0 R /Last 8 0 R /Count 1 >> endobj
+8 0 obj << /Title (Agreement) /Parent 7 0 R /Dest [3 0 R /Fit] >> endobj
+9 0 obj << /Title (Form fixture) /Author (pdf-deflyt tests) /CreationDate (D:20200102030405Z) /ModDate (D:20200102030405Z) >> endobj
+trailer << /Size 10 /Root 1 0 R /Info 9 0 R >>
+%%EOF
+RAW
+    printf 'attached notes\n' > "$BUILD_DIR/notes.txt"
+    qpdf "$BUILD_DIR/form_raw.pdf" --pages "$BUILD_DIR/form_raw.pdf" "$ASSETS_DIR/mixed_res.pdf" 1 -- \
+      --add-attachment "$BUILD_DIR/notes.txt" -- "$ASSETS_DIR/form_mixed.pdf" > /dev/null 2>&1 || true
+    rm -f "$BUILD_DIR/form_raw.pdf" "$BUILD_DIR/notes.txt"
+  fi
 }
 
 create_fixtures

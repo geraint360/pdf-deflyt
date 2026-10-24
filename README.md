@@ -42,6 +42,11 @@ See [Examples](#examples) for more usage patterns.
 - Simple CLI: `pdf-deflyt input.pdf -o output.pdf` (or compress in place with `--inplace`)
 - Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**
 - **ICC profile support**: Automatically detects and handles complex color profiles using ImageMagick
+- **Lossless gains on every preset**: Huffman-optimized JPEGs (`jpegtran`) and pixel-exact
+  JBIG2 for black-and-white scans (`jbig2enc`) — typically 30–50% off scanner G4 output
+- **Nothing important is lost**: form fields, annotations, links, bookmarks, attachments, the
+  text layer and the original metadata are checked after every lossy pass; a candidate that
+  drops any of them is discarded. Digitally signed PDFs are left untouched
 - Batch processing (files or folders), recursion, include/exclude filters, and parallel jobs
 - Dry‑run estimator with projected size and savings (no writes)
 - Skip rules to avoid work on tiny files or when savings would be negligible
@@ -216,6 +221,11 @@ Key advanced options include:
   Append results to the specified log file in CSV format, including input/output size,
   savings, and status.
 
+- `--timeout <SECS>`
+  Stop any single external step (Ghostscript, pdfcpu, qpdf, mutool, ...) that runs longer
+  than this (default 600, `0` disables). A stopped step just removes that candidate; the
+  file still gets the best remaining result. Needs `timeout`/`gtimeout` (coreutils).
+
 ### Preset strength ordering
 
 By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).
@@ -373,10 +383,25 @@ pdf-deflyt --debug icc-document.pdf
    - Always produces deterministic output for reproducibility
    - Always preserves metadata and timestamps
 
-6. **Safety rails**
-   - Several candidates are produced (structural only, Ghostscript, and the ICC helper when
-     relevant); each must keep the page count, and lossy ones must pass a low-resolution
-     visual comparison with the original. The smallest valid candidate wins.
+6. **Lossless image passes** (all presets, including `lossless`)
+   - JPEGs are re-encoded with optimized Huffman tables (`jpegtran -optimize -copy all`);
+     the pixels are identical and only smaller results are kept.
+   - 1-bit images (scanner G4/Flate output) are re-encoded as JBIG2 in **generic** mode
+     (`jbig2 -p -d`), which is pixel-exact. The lossy symbol mode, which can swap similar
+     glyphs, is never used. Each converted image is decoded and compared with the original
+     before the file is accepted.
+
+7. **Safety rails**
+   - Digitally signed PDFs are left byte-for-byte untouched (any rewrite invalidates the
+     signature), with a notice.
+   - Several candidates are produced (structural only, Ghostscript, and the ImageMagick
+     helper for ICC images or documents with form fields). Every candidate must keep the
+     page count, form fields and values, annotations and links, bookmarks, attachments,
+     the document metadata and the text layer (≥97% of words). Lossy candidates must also
+     pass a visual comparison of up to 5 pages sampled across the whole document (first,
+     last and evenly spaced). The smallest valid candidate wins.
+   - Each external step is bounded by `--timeout`, so one pathological file cannot stall a
+     DEVONthink batch.
    - `--min-gain` keeps the original unless savings meet your threshold.
    - In `--inplace` mode, the original is only replaced if the new file qualifies.
 
@@ -399,7 +424,9 @@ pdf-deflyt --debug icc-document.pdf
 - Useful for deduplication workflows and version control.
 
 ### Metadata & Timestamps
-- Metadata is always preserved for document integrity.
+- The original Info dictionary (title, author, keywords, creation/modification dates) and
+  XMP metadata are copied back verbatim after compression; Ghostscript and pdfcpu would
+  otherwise rewrite them.
 - Timestamps (mtime/atime) are always preserved for file tracking.
 
 ### Exit Status Codes

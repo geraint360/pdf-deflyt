@@ -94,6 +94,7 @@ Automation & Logging:
 
 Resource Control:
   --memory-limit SIZE      Max memory for Ghostscript (e.g., 512M, 2G)
+  --timeout SECS           Abandon any single tool run after SECS (default: 600, 0 = never)
 
 Output Control:
   --debug                  Print analysis and chosen targets only (writes no files)
@@ -114,17 +115,19 @@ EOF
 # ============================================================================
 # Configuration Constants (immutable)
 # ============================================================================
-readonly VERSION="2.4.0-zsh"
+readonly VERSION="2.5.0-zsh"
 readonly IMAGEMAGICK_TIMEOUT=30  # seconds for ImageMagick operations
 readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
 readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
 readonly VISUAL_RMSE_LIMIT=0.06    # max normalized RMSE between low-res renders of original and result
+readonly VISUAL_SAMPLE_PAGES=5     # pages rendered for the visual check (first, last, evenly spread)
+readonly TEXT_MATCH_MIN=0.97       # share of the original's words that must still be extractable
 
 # Dependency lists
 readonly -a REQUIRED_DEPS=(gs pdfcpu qpdf mutool exiftool pdfinfo pdfimages sha256sum)
 readonly -a REQUIRED_PKGS=('ghostscript' 'pdfcpu' 'qpdf' 'mupdf' 'exiftool' 'poppler' 'poppler' 'coreutils')
-readonly -a OPTIONAL_DEPS=(parallel magick)
-readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick')
+readonly -a OPTIONAL_DEPS=(parallel magick python3 jpegtran jbig2)
+readonly -a OPTIONAL_PKGS=('parallel' 'imagemagick' 'python' 'jpeg-turbo' 'jbig2enc')
 
 # Helper script path (can be overridden via environment: export PDF_DEFLYT_HELPER=/path/to/helper)
 : "${PDF_DEFLYT_HELPER:=}"
@@ -181,6 +184,7 @@ JPEGQ_OVERRIDE=""
 
 # Resource management
 MEMORY_LIMIT=""
+STEP_TIMEOUT=600  # seconds per external tool run; 0 disables
 
 # Metadata and timestamps (always enabled for consistency)
 readonly KEEP_METADATA=true
@@ -222,6 +226,7 @@ while [[ $# -gt 0 ]]; do
     --log) LOGFILE="${2:-}"; shift 2 ;;
     --min-gain) MIN_GAIN="${2:-1}"; shift 2 ;;
     --memory-limit) MEMORY_LIMIT="${2:-}"; shift 2 ;;
+    --timeout) STEP_TIMEOUT="${2:-}"; shift 2 ;;
     --password) PASSWORD="${2:-}"; shift 2 ;;
     --password-file) PASSWORD_FILE="${2:-}"; shift 2 ;;
     --post-hook) POST_HOOK="${2:-}"; shift 2 ;;
@@ -480,6 +485,13 @@ if ! [[ "$MIN_GAIN" =~ '^[0-9]+([.][0-9]+)?$' ]]; then
   exit 2
 fi
 
+# Validate step timeout
+if ! [[ "$STEP_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  log_error "--timeout must be a whole number of seconds (got: $STEP_TIMEOUT)"
+  exit 2
+fi
+export PDF_DEFLYT_STEP_TIMEOUT="$STEP_TIMEOUT"
+
 # Validate jobs parameter
 if [[ "$JOBS" == auto ]]; then
   JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
@@ -545,7 +557,7 @@ check_deps() {
 
   echo
   echo "Install with:"
-  echo "  brew install ghostscript pdfcpu qpdf mupdf exiftool poppler coreutils imagemagick parallel"
+  echo "  brew install ghostscript pdfcpu qpdf mupdf exiftool poppler coreutils imagemagick parallel python jpeg-turbo jbig2enc"
 
   return $missing
 }
@@ -733,7 +745,7 @@ analyse_pdf() {
   local zeros="0 0 0 0 0 0 0 0 0 0 0 0"
 
   local list
-  if ! list="$(pdfimages -list "$f" 2>/dev/null)"; then
+  if ! list="$(limit pdfimages -list "$f" 2>/dev/null)"; then
     echo "$zeros"; return
   fi
 
@@ -915,7 +927,10 @@ gs_pass() {
   $deterministic && GS_COMMON+=(-dDeterministicIDs=true)
   [[ -n "$jpegq" && "$jpegq" -gt 0 ]] && GS_COMMON+=(-dJPEGQ="$jpegq")
 
-  gs "${GS_COMMON[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1
+  local rc=0
+  limit gs "${GS_COMMON[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1 || rc=$?
+  (( rc == 124 )) && log_warn "Ghostscript timed out after ${STEP_TIMEOUT}s on ${in:t} (see --timeout)"
+  return $rc
 }
 
 gs_text_only_pass() {
@@ -943,7 +958,10 @@ gs_text_only_pass() {
   [[ -n "$mem_limit" && "$mem_limit" -gt 0 ]] && GS_TEXT_OPTS+=(-dBufferSpace="$mem_limit")
   $deterministic && GS_TEXT_OPTS+=(-dDeterministicIDs=true)
 
-  gs "${GS_TEXT_OPTS[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1
+  local rc=0
+  limit gs "${GS_TEXT_OPTS[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1 || rc=$?
+  (( rc == 124 )) && log_warn "Ghostscript timed out after ${STEP_TIMEOUT}s on ${in:t} (see --timeout)"
+  return $rc
 }
 
 python_recompress_images() {
@@ -962,7 +980,7 @@ python_recompress_images() {
   [[ -n "$c_res" && "$c_res" -gt 0 ]] && dpi_args+=(--color-dpi "$c_res")
   [[ -n "$g_res" && "$g_res" -gt 0 ]] && dpi_args+=(--gray-dpi "$g_res")
 
-  "$helper" $verbose_flag -q "${jpegq:-75}" "${dpi_args[@]}" "$in" "$out" 2>&1
+  limit "$helper" $verbose_flag -q "${jpegq:-75}" "${dpi_args[@]}" "$in" "$out" 2>&1
 }
 
 estimate_savings() {
@@ -1017,12 +1035,346 @@ estimate_savings() {
 pdfcpu_optimize() {
   local in="$1" out="$2"
   rm -f "$out" 2>/dev/null || true
-  if pdfcpu optimize -q -c disable "$in" "$out" >/dev/null 2>&1 && [[ -s "$out" ]]; then
+  if limit pdfcpu optimize -q -c disable "$in" "$out" >/dev/null 2>&1 && [[ -s "$out" ]]; then
     return 0
   fi
   rm -f "$out" 2>/dev/null || true
-  pdfcpu optimize -quiet "$in" "$out" >/dev/null 2>&1 && [[ -s "$out" ]]
+  limit pdfcpu optimize -quiet "$in" "$out" >/dev/null 2>&1 && [[ -s "$out" ]]
 }
+
+# Run an external command with the per-step time limit (GNU timeout), so one malformed
+# PDF cannot hang a batch or a DEVONthink Smart Rule. Exit status 124 means timed out.
+limit() {
+  if [[ -n "$TIMEOUT_BIN" ]] && (( STEP_TIMEOUT > 0 )); then
+    "$TIMEOUT_BIN" -k 10 "$STEP_TIMEOUT" "$@"
+  else
+    "$@"
+  fi
+}
+
+# Python (stdlib only) drives the qpdf-JSON based checks and lossless image passes.
+# /usr/bin/python3 is only used when the Command Line Tools are installed: otherwise it
+# is a stub that pops up an install dialog, which must never happen inside DEVONthink.
+find_python() {
+  local cand
+  for cand in "$(command -v python3 2>/dev/null)" /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    [[ -n "$cand" && -x "$cand" ]] || continue
+    if [[ "$cand" == /usr/bin/python3 ]] && ! xcode-select -p >/dev/null 2>&1; then
+      continue
+    fi
+    "$cand" -I -c 'import json, subprocess' >/dev/null 2>&1 && { print -r -- "$cand"; return 0; }
+  done
+  return 1
+}
+
+pdftool() { limit "$PYTHON" -I -c "$PDFTOOL" "$@"; }
+
+PDFTOOL=$(cat <<'PY'
+import json, os, shutil, subprocess, sys
+
+TIMEOUT = int(os.environ.get("PDF_DEFLYT_STEP_TIMEOUT") or 0) or None
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT, **kw)
+
+
+def qpdf_json(path, keys):
+    cmd = ["qpdf", "--json=2"] + ["--json-key=" + k for k in keys] + [path]
+    r = run(cmd)
+    if r.returncode not in (0, 3):
+        raise RuntimeError("qpdf --json failed: " + r.stderr.decode(errors="replace")[:200])
+    return json.loads(r.stdout)
+
+
+def as_list(v):
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def fingerprint(path):
+    """Features that must survive compression, plus the document metadata."""
+    data = qpdf_json(path, ["pages", "acroform", "attachments", "outlines", "qpdf"])
+    objs = data["qpdf"][1]
+
+    def deref(v):
+        if isinstance(v, str) and v.endswith(" R"):
+            o = objs.get("obj:" + v, {})
+            return o.get("value", o.get("stream", {}).get("dict"))
+        return v
+
+    annots = {}
+    for page in data.get("pages", []):
+        pdict = deref(page["object"]) or {}
+        for a in as_list(deref(pdict.get("/Annots"))):
+            sub = (deref(a) or {}).get("/Subtype", "?")
+            annots[sub] = annots.get(sub, 0) + 1
+
+    fields, signed = [], False
+    for f in data.get("acroform", {}).get("fields", []):
+        fields.append([f.get("fullname"), f.get("fieldtype"), json.dumps(f.get("value"), sort_keys=True)])
+        if f.get("fieldtype") == "/Sig" and f.get("value") not in (None, "null"):
+            signed = True
+
+    titles = []
+
+    def walk(items):
+        for it in items:
+            titles.append(it.get("title"))
+            walk(it.get("kids", []))
+
+    walk(data.get("outlines", []))
+
+    info = deref(objs.get("trailer", {}).get("value", {}).get("/Info")) or {}
+    meta = {k: info.get(k) for k in ("/Title", "/Author", "/Subject", "/Keywords",
+                                     "/Creator", "/CreationDate", "/ModDate") if info.get(k) is not None}
+    return {
+        "features": {
+            "pages": len(data.get("pages", [])),
+            "annotations": annots,
+            "fields": sorted(fields),
+            "attachments": sorted(data.get("attachments", {}).keys()),
+            "outlines": titles,
+        },
+        "signed": signed,
+        "meta": meta,
+    }
+
+
+def pbm_pixels(path):
+    """Raw PBM (P4) pixels with each row's padding bits masked off."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    fields, pos = [], 0
+    while len(fields) < 3:  # magic, width, height (comments skipped)
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":
+            pos = data.index(b"\n", pos)
+            continue
+        end = pos
+        while not data[end:end + 1].isspace():
+            end += 1
+        fields.append(data[pos:end]); pos = end
+    if fields[0] != b"P4":
+        return None
+    w, h = int(fields[1]), int(fields[2])
+    pos += 1
+    stride = (w + 7) // 8
+    mask = (0xFF << (stride * 8 - w)) & 0xFF
+    rows = bytearray(data[pos:pos + stride * h])
+    if len(rows) != stride * h:
+        return None
+    for r in range(h):
+        rows[r * stride + stride - 1] &= mask
+    return (w, h, bytes(rows))
+
+
+def filters(d):
+    return as_list(d.get("/Filter"))
+
+
+def images(inp, out, work, jpeg, jbig2):
+    """Lossless image pass: Huffman-optimize JPEGs (jpegtran) and re-encode 1-bit images
+    as JBIG2 generic regions (jbig2enc). Every JBIG2 image is verified pixel-exact."""
+    os.makedirs(work, exist_ok=True)
+    js = os.path.join(work, "doc.json")
+    r = run(["qpdf", inp, "--json-output=2", "--json-stream-data=file",
+             "--json-stream-prefix=" + os.path.join(work, "s"), "--decode-level=none", js])
+    if r.returncode not in (0, 3):
+        return 1
+    with open(js) as fh:
+        data = json.load(fh)
+    objs = data["qpdf"][1]
+    stats = {"jpeg": 0, "jpeg_saved": 0, "jbig2": 0, "jbig2_saved": 0}
+
+    if jpeg:
+        for key, o in objs.items():
+            s = o.get("stream")
+            if not s or "datafile" not in s:
+                continue
+            d = s["dict"]
+            if d.get("/Subtype") != "/Image" or filters(d) != ["/DCTDecode"]:
+                continue
+            src = s["datafile"]
+            dst = src + ".opt.jpg"
+            with open(dst, "wb") as fh:
+                rr = subprocess.run(["jpegtran", "-copy", "all", "-optimize", src],
+                                    stdout=fh, stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+            old, new = os.path.getsize(src), os.path.getsize(dst)
+            if rr.returncode == 0 and 0 < new < old:
+                s["datafile"] = dst
+                stats["jpeg"] += 1
+                stats["jpeg_saved"] += old - new
+
+    converted = {}  # pdfimages index -> pbm path of the original pixels
+    if jbig2:
+        # Decode 1-bit images with pdfimages (handles CCITT/Flate); map list rows -> objects
+        lst = run(["pdfimages", "-list", inp]).stdout.decode(errors="replace").splitlines()
+        rows = {}
+        for line in lst[2:]:
+            p = line.split()
+            if len(p) >= 12 and p[2] == "image" and p[5] == "gray" and p[7] == "1":
+                rows.setdefault(p[10], int(p[1]))  # first occurrence of each object
+        if rows:
+            run(["pdfimages", inp, os.path.join(work, "m")])
+        for objnum, idx in rows.items():
+            o = objs.get("obj:%s 0 R" % objnum)
+            s = (o or {}).get("stream")
+            pbm = os.path.join(work, "m-%03d.pbm" % idx)
+            if not s or "datafile" not in s or not os.path.exists(pbm):
+                continue
+            d = s["dict"]
+            cs = d.get("/ColorSpace")
+            if isinstance(cs, str) and cs.endswith(" R"):
+                cs = objs.get("obj:" + cs, {}).get("value")
+            if (d.get("/ImageMask") is True or d.get("/BitsPerComponent") != 1
+                    or cs != "/DeviceGray"
+                    or filters(d) not in ([], ["/CCITTFaxDecode"], ["/FlateDecode"])):
+                continue
+            jb = pbm + ".jb2"
+            with open(jb, "wb") as fh:
+                rr = subprocess.run(["jbig2", "-p", "-d", pbm], stdout=fh,
+                                    stderr=subprocess.DEVNULL, timeout=TIMEOUT)
+            old, new = os.path.getsize(s["datafile"]), os.path.getsize(jb)
+            if rr.returncode == 0 and 0 < new < old:
+                s["datafile"] = jb
+                d["/Filter"] = "/JBIG2Decode"
+                d.pop("/DecodeParms", None)
+                converted[idx] = pbm
+                stats["jbig2"] += 1
+                stats["jbig2_saved"] += old - new
+
+    if not (stats["jpeg"] or stats["jbig2"]):
+        return 2  # nothing to do
+    if converted and data["qpdf"][0].get("pdfversion", "1.4") < "1.4":
+        data["qpdf"][0]["pdfversion"] = "1.4"  # JBIG2Decode needs PDF 1.4
+    js2 = os.path.join(work, "doc2.json")
+    with open(js2, "w") as fh:
+        json.dump(data, fh)
+    r = run(["qpdf", "--json-input", js2, out])
+    if r.returncode not in (0, 3) or not os.path.exists(out):
+        return 1
+
+    if converted:
+        # Pixel-exact verification: decode the new file and compare with the originals.
+        # qpdf renumbers objects on write, so match images by their position instead.
+        run(["pdfimages", out, os.path.join(work, "v")])
+        for idx, pbm in converted.items():
+            v = os.path.join(work, "v-%03d.pbm" % idx)
+            if not os.path.exists(v):
+                return 1
+            if pbm_pixels(pbm) != pbm_pixels(v):
+                return 1
+    print(json.dumps(stats))
+    return 0
+
+
+def restore_meta(ref, cand, out, work):
+    """Copy the original Info dictionary and XMP stream byte-for-byte onto cand.
+    Ghostscript and pdfcpu rewrite dates/XMP; DEVONthink and archives rely on them."""
+    os.makedirs(work, exist_ok=True)
+    r = run(["qpdf", ref, "--json-output=2", "--json-key=qpdf", "--json-stream-data=file",
+             "--json-stream-prefix=" + os.path.join(work, "r"), "--decode-level=generalized",
+             os.path.join(work, "ref.json")])
+    if r.returncode not in (0, 3):
+        return 1
+    with open(os.path.join(work, "ref.json")) as fh:
+        rq = json.load(fh)["qpdf"]
+    robjs = rq[1]
+    cq = qpdf_json(cand, ["qpdf"])["qpdf"]
+    cobjs = cq[1]
+    rtrailer = robjs.get("trailer", {}).get("value", {})
+    ctrailer = dict(cobjs.get("trailer", {}).get("value", {}))
+
+    def rval(v):
+        if isinstance(v, str) and v.endswith(" R"):
+            return robjs.get("obj:" + v, {}).get("value")
+        return v
+
+    def first_obj(keys):
+        return keys[0] if keys else None
+
+    next_id = int(cq[0].get("maxobjectid", 0)) + 1
+    update = {}
+    rinfo = rval(rtrailer.get("/Info"))
+    if isinstance(rinfo, dict):
+        # Only plain values can be copied verbatim; references inside Info are unusual
+        rinfo = {k: v for k, v in rinfo.items() if not (isinstance(v, str) and v.endswith(" R"))}
+        cref = ctrailer.get("/Info")
+        if isinstance(cref, str) and cref.endswith(" R"):
+            update["obj:" + cref] = {"value": rinfo}
+        else:
+            ref_id = "%d 0 R" % next_id; next_id += 1
+            update["obj:" + ref_id] = {"value": rinfo}
+            ctrailer["/Info"] = ref_id
+            update["trailer"] = {"value": ctrailer}
+    elif "/Info" in ctrailer:
+        # The original had no Info dictionary; drop the one the rewrite added
+        del ctrailer["/Info"]
+        update["trailer"] = {"value": ctrailer}
+
+    croot_ref = ctrailer.get("/Root")
+    croot = dict(cobjs.get("obj:" + croot_ref, {}).get("value", {}))
+    rroot = rval(rtrailer.get("/Root")) or {}
+    rmeta = rroot.get("/Metadata")
+    rstream = robjs.get("obj:" + rmeta, {}).get("stream") if isinstance(rmeta, str) else None
+    if rstream and rstream.get("datafile"):
+        d = {k: v for k, v in rstream["dict"].items() if k not in ("/Filter", "/DecodeParms", "/Length")}
+        mref = croot.get("/Metadata")
+        if not (isinstance(mref, str) and mref.endswith(" R")):
+            mref = "%d 0 R" % next_id; next_id += 1
+            croot["/Metadata"] = mref
+            update["obj:" + croot_ref] = {"value": croot}
+        update["obj:" + mref] = {"stream": {"dict": d, "datafile": rstream["datafile"]}}
+    elif "/Metadata" in croot:
+        croot.pop("/Metadata")  # the original had no XMP; drop the one the rewrite added
+        update["obj:" + croot_ref] = {"value": croot}
+
+    if not update:
+        shutil.copyfile(cand, out)
+        return 0
+    upd = os.path.join(work, "update.json")
+    with open(upd, "w") as fh:
+        json.dump({"qpdf": [{"jsonversion": 2, "pdfversion": cq[0].get("pdfversion", "1.7")}, update]}, fh)
+    r = run(["qpdf", cand, "--update-from-json=" + upd, "--object-streams=generate",
+             "--compress-streams=y", out])
+    return 0 if r.returncode in (0, 3) and os.path.exists(out) else 1
+
+
+def check(ref_json, cand):
+    """Exit 0 if cand keeps every feature and the metadata of the reference."""
+    with open(ref_json) as fh:
+        ref = json.load(fh)
+    got = fingerprint(cand)
+    problems = []
+    for k, v in ref["features"].items():
+        if got["features"].get(k) != v:
+            problems.append("%s: %s -> %s" % (k, json.dumps(v)[:80], json.dumps(got["features"].get(k))[:80]))
+    if got["meta"] != ref["meta"]:
+        problems.append("metadata changed")
+    if problems:
+        print("; ".join(problems))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1]
+    if cmd == "fingerprint":
+        print(json.dumps(fingerprint(sys.argv[2]), sort_keys=True))
+    elif cmd == "signed":
+        sys.exit(0 if fingerprint(sys.argv[2])["signed"] else 1)
+    elif cmd == "check":
+        sys.exit(check(sys.argv[2], sys.argv[3]))
+    elif cmd == "restore-meta":
+        sys.exit(restore_meta(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]))
+    elif cmd == "images":
+        sys.exit(images(sys.argv[2], sys.argv[3], sys.argv[4],
+                        sys.argv[5] == "1", sys.argv[6] == "1"))
+PY
+)
 
 page_count() {
   pdfinfo "$1" 2>/dev/null | awk '/^Pages:/{print $2; found=1} END{if(!found) print 0}'
@@ -1030,35 +1382,59 @@ page_count() {
 
 have_magick() { command -v magick >/dev/null 2>&1; }
 
-# Render up to the first 3 pages of both files at low resolution and compare them.
+# Pages to render for the visual check: all of them for short documents, otherwise the
+# first, the last and evenly spread pages in between.
+sample_pages() {
+  awk -v n="$1" -v k="$VISUAL_SAMPLE_PAGES" 'BEGIN{
+    if (n <= k) { for (i = 1; i <= n; i++) printf "%s%d", (i > 1 ? "," : ""), i; exit }
+    for (i = 0; i < k; i++) {
+      p = 1 + int(i * (n - 1) / (k - 1) + 0.5)
+      if (!(p in seen)) { seen[p] = 1; printf "%s%d", (c++ ? "," : ""), p }
+    }
+  }'
+}
+
+# Render sampled pages of both files at low resolution and compare them.
 # Catches gross damage from lossy passes (inverted CMYK, missing or blank images,
 # colour shifts) without being sensitive to normal JPEG/downsampling noise.
 # Returns 0 when the candidate looks like the reference, or when no check is possible.
 visual_check() {
   local ref="$1" cand="$2" pages="$3" scratch="$4"
   have_magick || return 0
-  local n=$(( pages < 3 ? pages : 3 ))
-  (( n >= 1 )) || return 0
+  (( pages >= 1 )) || return 0
   mkdir -p "$scratch" 2>/dev/null || return 0
-  mutool draw -q -r 24 -c rgb -o "$scratch/ref-%d.png" "$ref" "1-$n" >/dev/null 2>&1 || return 0
-  if ! mutool draw -q -r 24 -c rgb -o "$scratch/cand-%d.png" "$cand" "1-$n" >/dev/null 2>&1; then
+  local list p dist
+  list="$(sample_pages "$pages")"
+  limit mutool draw -q -r 24 -c rgb -o "$scratch/ref-%d.png" "$ref" "$list" >/dev/null 2>&1 || return 0
+  if ! limit mutool draw -q -r 24 -c rgb -o "$scratch/cand-%d.png" "$cand" "$list" >/dev/null 2>&1; then
     log_debug "visual check: candidate failed to render"
     return 1
   fi
-  local i dist
-  for (( i = 1; i <= n; i++ )); do
-    [[ -f "$scratch/ref-$i.png" ]] || continue
-    [[ -f "$scratch/cand-$i.png" ]] || return 1
-    dist="$(magick "$scratch/ref-$i.png" -resize '256x256!' \
-                   \( "$scratch/cand-$i.png" -resize '256x256!' \) \
+  for p in ${(s:,:)list}; do
+    [[ -f "$scratch/ref-$p.png" ]] || continue
+    [[ -f "$scratch/cand-$p.png" ]] || return 1
+    dist="$(magick "$scratch/ref-$p.png" -resize '256x256!' \
+                   \( "$scratch/cand-$p.png" -resize '256x256!' \) \
                    -metric RMSE -compare -format '%[distortion]' info: 2>/dev/null)" || return 0
     [[ "$dist" =~ '^[0-9.eE+-]+$' ]] || return 0
-    log_debug "visual check: page $i RMSE=$dist (limit $VISUAL_RMSE_LIMIT)"
+    log_debug "visual check: page $p RMSE=$dist (limit $VISUAL_RMSE_LIMIT)"
     if awk -v d="$dist" -v l="$VISUAL_RMSE_LIMIT" 'BEGIN{exit !(d > l)}'; then
       return 1
     fi
   done
   return 0
+}
+
+# The text layer (e.g. OCR from a scanner) must stay extractable: DEVONthink indexes it.
+# Compares the words pdftotext finds; layout/spacing differences are ignored.
+text_check() {
+  local ref_txt="$1" cand="$2" cand_txt="$3"
+  [[ -s "$ref_txt" ]] && LC_ALL=C grep -q '[[:alnum:]]' "$ref_txt" || return 0
+  limit pdftotext -q -enc UTF-8 "$cand" "$cand_txt" >/dev/null 2>&1 || return 1
+  LC_ALL=C awk -v min="$TEXT_MATCH_MIN" -F '[^[:alnum:]]+' '
+    FNR == NR { for (i = 1; i <= NF; i++) if ($i != "") { ref[tolower($i)]++; total++ }; next }
+    { for (i = 1; i <= NF; i++) { t = tolower($i); if (t != "" && ref[t] > 0) { ref[t]--; matched++ } } }
+    END { if (total == 0) exit 0; exit !(matched / total >= min) }' "$ref_txt" "$cand_txt"
 }
 
 # Lossless structural passes; keeps whichever valid result is smallest.
@@ -1069,10 +1445,10 @@ finalize_candidate() {
   if pdfcpu_optimize "$in" "$out.p"; then
     tries+=("$out.p"); src="$out.p"
   fi
-  mutool clean -z "$src" "$out.m" >/dev/null 2>&1 && tries+=("$out.m")
+  limit mutool clean -z "$src" "$out.m" >/dev/null 2>&1 && tries+=("$out.m")
   # qpdf exits 3 for "succeeded with warnings"
   local qrc=0
-  qpdf --object-streams=generate --compress-streams=y --recompress-flate \
+  limit qpdf --object-streams=generate --compress-streams=y --recompress-flate \
        --compression-level=9 "$src" "$out.q" >/dev/null 2>&1 || qrc=$?
   (( qrc == 0 || qrc == 3 )) && [[ -s "$out.q" ]] && tries+=("$out.q")
   for cand in "${tries[@]}"; do
@@ -1101,8 +1477,19 @@ validate_candidate() {
     qpdf --check "$cand" >/dev/null 2>&1 || qrc=$?
     (( qrc == 0 || qrc == 3 )) || { log_debug "candidate rejected: qpdf --check failed"; return 1; }
   fi
+  if [[ -n "${REF_FP:-}" ]]; then
+    local why
+    if ! why="$(pdftool check "$REF_FP" "$cand" 2>&1)"; then
+      log_verbose "candidate rejected: ${why:-feature check failed}"
+      return 1
+    fi
+  fi
+  if [[ -n "${REF_TXT:-}" ]] && ! text_check "$REF_TXT" "$cand" "$scratch.txt"; then
+    log_verbose "candidate rejected: text layer no longer matches the original"
+    return 1
+  fi
   if [[ "$lossy" == true ]] && ! visual_check "$ref" "$cand" "$ref_pages" "$scratch"; then
-    log_debug "candidate rejected: rendered pages differ too much from the original"
+    log_verbose "candidate rejected: rendered pages differ too much from the original"
     return 1
   fi
   return 0
@@ -1267,8 +1654,8 @@ _process_one_inner() {
       return 2
     fi
     chmod 600 "$_po_dec" 2>/dev/null || true
-    qpdf --password="$PASSWORD" --decrypt -- "$IN" "$_po_dec" >/dev/null 2>&1
-    local qrc=$?
+    local qrc=0
+    limit qpdf --password="$PASSWORD" --decrypt -- "$IN" "$_po_dec" >/dev/null 2>&1 || qrc=$?
     if (( qrc == 0 || qrc == 3 )) && [[ -s "$_po_dec" ]]; then
       IN="$_po_dec"
     else
@@ -1303,6 +1690,33 @@ _process_one_inner() {
     return 2
   }
   local W="$_po_work"
+
+  # 0) Reference: features/metadata fingerprint, text layer, and signature check
+  local REF_FP="" REF_TXT="" SIGNED=false NO_LOSSY=false HAS_FIELDS=false
+  if [[ -n "$PYTHON" ]]; then
+    if pdftool fingerprint "$IN" > "$W/ref.json" 2>/dev/null && [[ -s "$W/ref.json" ]]; then
+      REF_FP="$W/ref.json"
+      grep -q '"signed": true' "$REF_FP" && SIGNED=true
+      grep -q '"fields": \[\]' "$REF_FP" || HAS_FIELDS=true
+    else
+      log_verbose "Could not fingerprint ${orig##*/}; only structural optimization will be used"
+      NO_LOSSY=true
+    fi
+  else
+    # Without Python: detect signatures and interactive features conservatively
+    [[ "$(limit qpdf --qdf --object-streams=disable "$IN" - 2>/dev/null | LC_ALL=C grep -ac '/ByteRange')" -gt 0 ]] && SIGNED=true
+    if ! pdfinfo "$IN" 2>/dev/null | grep -q '^Form:[[:space:]]*none' || \
+       [[ "$(pdfdetach -list "$IN" 2>/dev/null | awk 'NR==1{print $1+0}')" -gt 0 ]]; then
+      log_verbose "Forms/attachments present and python3 unavailable; only structural optimization will be used"
+      NO_LOSSY=true
+    fi
+  fi
+  if limit pdftotext -q -enc UTF-8 "$IN" "$W/ref.txt" >/dev/null 2>&1; then
+    REF_TXT="$W/ref.txt"
+  fi
+  if $SIGNED; then
+    log "NOTICE: ${orig##*/} is digitally signed; keeping it unchanged (any rewrite would invalidate the signature)"
+  fi
 
   # 1) Structural optimization (lossless). Never accept a bigger or broken result.
   local base="$W/base.pdf" IN_BYTES=$(size_of "$IN") PDFCPU_MADE_BIGGER=false
@@ -1344,18 +1758,22 @@ _process_one_inner() {
   local -a cands=("$base")
   typeset -A cand_lossy
   cand_lossy[$base]=false
-  if [[ "$PRESET" == lossless ]]; then
+  if $SIGNED; then
+    cands=()
+  elif [[ "$PRESET" == lossless ]] || $NO_LOSSY; then
     :
   elif $NO_IMAGES; then
     if ! $PDFCPU_MADE_BIGGER && gs_text_only_pass "$base" "$W/text.pdf" "$DETERMINISTIC" "$MEMORY_LIMIT_BYTES"; then
       cands+=("$W/text.pdf"); cand_lossy[$W/text.pdf]=true
     fi
   else
-    if $HAS_ICC; then
-      log_verbose "ICC profile images detected; also trying the ImageMagick helper"
+    # Ghostscript flattens ICC colour and drops form fields, so documents with either
+    # also get a candidate that recompresses the images in place.
+    if $HAS_ICC || $HAS_FIELDS; then
+      log_verbose "ICC profile images or form fields detected; also trying the ImageMagick helper"
       local icc_in="$W/icc-in.pdf"
       # Repair with qpdf first; the helper is sensitive to xref problems
-      qpdf "$base" "$icc_in" >/dev/null 2>&1 || cp "$base" "$icc_in"
+      limit qpdf "$base" "$icc_in" >/dev/null 2>&1 || cp "$base" "$icc_in"
       if python_recompress_images "$icc_in" "$W/icc.pdf" "$JPEGQ" "$C_RES" "$G_RES" >/dev/null 2>&1 && [[ -s "$W/icc.pdf" ]]; then
         cands+=("$W/icc.pdf"); cand_lossy[$W/icc.pdf]=true
       else
@@ -1371,10 +1789,30 @@ _process_one_inner() {
 
   # 4) Finalize + validate each candidate, keep the smallest valid one
   local best="" best_sz=0 c fin sz k=0
+  local src img_log
   for c in "${cands[@]}"; do
     k=$(( k + 1 ))
     fin="$W/fin-$k.pdf"
-    finalize_candidate "$c" "$fin"
+    src="$c"
+    # Lossless image pass: Huffman-optimized JPEGs and JBIG2 (generic, pixel-exact) for
+    # 1-bit scans. The helper verifies every JBIG2 image against the original pixels.
+    if [[ -n "$PYTHON" ]] && { $HAVE_JPEGTRAN || $HAVE_JBIG2; }; then
+      if img_log="$(pdftool images "$c" "$W/img-$k.pdf" "$W/imgw-$k" \
+                     "$($HAVE_JPEGTRAN && echo 1 || echo 0)" "$($HAVE_JBIG2 && echo 1 || echo 0)" 2>/dev/null)" \
+         && [[ -s "$W/img-$k.pdf" ]]; then
+        src="$W/img-$k.pdf"
+        log_debug "lossless image pass on ${c:t}: $img_log"
+      fi
+      rm -rf "$W/imgw-$k" 2>/dev/null || true
+    fi
+    finalize_candidate "$src" "$fin"
+    # Rewrites (Ghostscript, pdfcpu) replace dates and XMP; put the original's back
+    if [[ -n "$REF_FP" ]]; then
+      if pdftool restore-meta "$IN" "$fin" "$W/meta-$k.pdf" "$W/metaw-$k" >/dev/null 2>&1 && [[ -s "$W/meta-$k.pdf" ]]; then
+        mv -f "$W/meta-$k.pdf" "$fin"
+      fi
+      rm -rf "$W/metaw-$k" 2>/dev/null || true
+    fi
     if ! validate_candidate "$IN" "$fin" "$IN_PAGES" "${cand_lossy[$c]}" "$W/vc-$k"; then
       log_verbose "Rejected candidate ${c:t} for ${orig##*/} (failed validation)"
       continue
@@ -1387,7 +1825,9 @@ _process_one_inner() {
   done
 
   local note="ok" OUT_BYTES SAVEPCT BEST_PCT="0" replace_ok=0
-  if [[ -z "$best" ]]; then
+  if $SIGNED; then
+    OUT_BYTES=$ORIG_BYTES
+  elif [[ -z "$best" ]]; then
     log_error "No valid compressed result for ${orig##*/}; keeping original"
     note="validation-failed"
     OUT_BYTES=$ORIG_BYTES
@@ -1504,6 +1944,17 @@ run_wrapper() {
   return $rc
 }
 
+# Optional tools
+TIMEOUT_BIN=""
+if command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="$(command -v gtimeout)"
+elif timeout --version 2>/dev/null | grep -q 'GNU coreutils'; then
+  TIMEOUT_BIN="$(command -v timeout)"
+fi
+PYTHON="$(find_python 2>/dev/null)" || PYTHON=""
+HAVE_JPEGTRAN=false; command -v jpegtran >/dev/null 2>&1 && HAVE_JPEGTRAN=true
+HAVE_JBIG2=false; command -v jbig2 >/dev/null 2>&1 && HAVE_JBIG2=true
+
 if $INTERNAL_ONE; then
   rc=0
   run_wrapper "${FILES[1]}" "" || rc=$?
@@ -1539,6 +1990,7 @@ if (( JOBS > 1 )); then
   $SIDECAR && WORKER_OPTS+=(--sidecar-sha256)
   [[ -n "$LOGFILE" ]] && WORKER_OPTS+=(--log "$LOGFILE")
   [[ -n "$MEMORY_LIMIT" ]] && WORKER_OPTS+=(--memory-limit "$MEMORY_LIMIT")
+  WORKER_OPTS+=(--timeout "$STEP_TIMEOUT")
   [[ -n "$POST_HOOK" ]] && WORKER_OPTS+=(--post-hook "$POST_HOOK")
   if [[ -n "$PASSWORD_FILE" ]]; then
     WORKER_OPTS+=(--password-file "$PASSWORD_FILE")

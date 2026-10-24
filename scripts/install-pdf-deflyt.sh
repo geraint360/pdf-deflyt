@@ -169,6 +169,10 @@ install_deps_macos() {
   ensure_mutool_macos
   if [[ $INSTALL_PARALLEL -eq 1 ]]; then brew_install_if_missing parallel; fi
   if [[ $INSTALL_IMAGEMAGICK -eq 1 ]]; then brew_install_if_missing imagemagick; fi
+  # Optional lossless passes: Huffman-optimized JPEGs (jpegtran) and JBIG2 for 1-bit scans
+  for p in jpeg-turbo jbig2enc; do
+    brew_install_if_missing "$p" || log "[warn] Could not install $p; that lossless pass will be skipped."
+  done
 }
 
 # ---------- Linux (apt/dnf/pacman/zypper) ----------
@@ -288,6 +292,18 @@ install_deps_linux() {
 
   log "[install] Installing Linux dependencies via $pkg_mgr..."
   linux_install_pkgs "${pkgs[@]}"
+
+  # Optional lossless passes (jpegtran, jbig2enc); package names vary, so best effort
+  local extras=()
+  case "$pkg_mgr" in
+    apt) extras=(libjpeg-turbo-progs jbig2) ;;
+    dnf) extras=(libjpeg-turbo-utils jbig2enc) ;;
+    pacman) extras=(libjpeg-turbo jbig2enc) ;;
+    zypper) extras=(libjpeg-turbo jbig2enc) ;;
+  esac
+  for p in "${extras[@]}"; do
+    linux_install_pkgs "$p" > /dev/null 2>&1 || log "[warn] Could not install $p; that lossless pass will be skipped."
+  done
 
   # Ensure mutool exists (mandatory)
   if ! command -v mutool > /dev/null 2>&1; then
