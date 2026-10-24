@@ -456,19 +456,15 @@ pdf-deflyt --debug icc-document.pdf
 
 #### Typical Performance
 
-Based on benchmarks on a modern MacBook Pro (M1/M2):
-
-| File Type | Size | Preset | Avg Time | Savings | Output Size |
-|-----------|------|--------|----------|---------|-------------|
-| Mixed document (scan + text) | 2.5 MB | standard | ~0.8s | 45% | 1.4 MB |
-| Image-heavy PDF | 8.2 MB | standard | ~2.1s | 63% | 3.0 MB |
-| Vector-only document | 450 KB | standard | ~0.3s | 12% | 396 KB |
-| Photo portfolio | 15 MB | light | ~3.5s | 38% | 9.3 MB |
-| Scanned book (100 pages) | 45 MB | extreme | ~8.2s | 78% | 9.9 MB |
+Savings and run time depend heavily on the content (scan resolution, image count, how the
+PDF was produced), so measure on your own documents. One thing that is roughly constant is
+a fixed per-file overhead from tool start-up and the safety checks: on an Apple M2 Pro, even
+a single-page file takes about **1.5 s** with the lossy presets and **0.9 s** with
+`lossless`. For large batches, use `--jobs`.
 
 *Run your own benchmarks:*
 ```bash
-make benchmark           # Run performance benchmarks on test fixtures
+make benchmark           # Time each preset on the small synthetic test fixtures
 make benchmark RUNS=5    # Average over 5 runs
 ```
 

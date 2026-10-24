@@ -17,9 +17,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-log() { echo -e "${BLUE}[BENCH]${NC} $*"; }
-success() { echo -e "${GREEN}✓${NC} $*"; }
-info() { echo -e "${YELLOW}→${NC} $*"; }
+log() { echo -e "${BLUE}[BENCH]${NC} $*" >&2; }
+success() { echo -e "${GREEN}✓${NC} $*" >&2; }
+info() { echo -e "${YELLOW}→${NC} $*" >&2; }
 
 # Setup
 setup_bench() {
@@ -102,8 +102,8 @@ bench_one() {
   local ratio=0
   local savings=0
   if [[ $input_size -gt 0 ]]; then
-    ratio=$(awk -v out="$output_size" -v in="$input_size" 'BEGIN{printf "%.2f", out/in}')
-    savings=$(awk -v out="$output_size" -v in="$input_size" 'BEGIN{printf "%.1f", (1-out/in)*100}')
+    ratio=$(awk -v out="$output_size" -v inp="$input_size" 'BEGIN{printf "%.2f", out/inp}')
+    savings=$(awk -v out="$output_size" -v inp="$input_size" 'BEGIN{printf "%.1f", (1-out/inp)*100}')
   fi
 
   # Output result in CSV format
@@ -113,7 +113,7 @@ bench_one() {
 # Main benchmark suite
 run_benchmarks() {
   log "Starting benchmark suite (${RUNS} runs per test)..."
-  echo
+  echo >&2
 
   # CSV header
   echo "File,Preset,Input Size (bytes),Output Size (bytes),Ratio,Savings (%),Avg Time (ms)"
@@ -143,7 +143,7 @@ run_benchmarks() {
     done
   done
 
-  echo
+  echo >&2
   success "Benchmark complete!"
 }
 

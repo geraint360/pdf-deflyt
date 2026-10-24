@@ -115,7 +115,7 @@ EOF
 # ============================================================================
 # Configuration Constants (immutable)
 # ============================================================================
-readonly VERSION="2.5.0-zsh"
+readonly VERSION="2.5.1-zsh"
 readonly IMAGEMAGICK_TIMEOUT=30  # seconds for ImageMagick operations
 readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
 readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
@@ -1059,7 +1059,9 @@ find_python() {
   local cand
   for cand in "$(command -v python3 2>/dev/null)" /opt/homebrew/bin/python3 /usr/local/bin/python3; do
     [[ -n "$cand" && -x "$cand" ]] || continue
-    if [[ "$cand" == /usr/bin/python3 ]] && ! xcode-select -p >/dev/null 2>&1; then
+    # On macOS /usr/bin/python3 is a stub that opens an install dialog unless the Xcode
+    # Command Line Tools are present; elsewhere it is the real system Python
+    if [[ "$OSTYPE" == darwin* && "$cand" == /usr/bin/python3 ]] && ! xcode-select -p >/dev/null 2>&1; then
       continue
     fi
     "$cand" -I -c 'import json, subprocess' >/dev/null 2>&1 && { print -r -- "$cand"; return 0; }

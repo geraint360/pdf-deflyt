@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-10-24
+
+### Fixed
+- Linux: the system `/usr/bin/python3` was ignored (a macOS-only Xcode check applied
+  everywhere), which silently disabled the metadata restore, feature and text checks
+  and the lossless JPEG/JBIG2 passes
+- `make benchmark` failed immediately (`in` is a reserved word in awk), its summary
+  included the progress lines, and `RUNS=N` was ignored
+
+### Changed
+- README: removed the "Typical Performance" table, whose figures could not be
+  reproduced, in favour of measured per-file overhead and `make benchmark`
+
 ## [2.5.0] - 2026-10-24
 
 ### Added

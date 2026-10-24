@@ -162,6 +162,7 @@ fmt:
 	@scripts/format.sh
 
 # Run performance benchmarks
+RUNS ?= 3
 benchmark:
 	@echo "🚀 Running performance benchmarks..."
-	@tests/benchmark.sh
+	@tests/benchmark.sh --runs $(RUNS)
