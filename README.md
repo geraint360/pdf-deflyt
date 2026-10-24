@@ -85,10 +85,15 @@ curl -fsSL https://raw.githubusercontent.com/geraint360/pdf-deflyt/main/scripts/
 	- **coreutils**
 	- **mupdf-tools** *(automatically preferred; falls back to `mupdf` if already installed)*
 	- **parallel** (optional, speeds up batch jobs)
-	
+	- **jpeg-turbo** (optional, provides `jpegtran` for lossless JPEG optimization)
+	- **jbig2enc** (optional, provides `jbig2` for lossless JBIG2 re-encoding of black-and-white scans)
+
+  - **Python 3** (standard on Linux; on macOS use Homebrew `python` or the Xcode Command Line
+    Tools). It runs the feature, metadata and signature checks and the lossless image passes.
+    Without it, PDFs with form fields or attachments only get structural optimization.
+
   - For the optional ability to recode FlateDecode (zlib-compressed) embedded images carrying ICC profiles as lossy JPEGs
-	   - **imagemagick**
-     - **Python 3.7+** (standard on modern macOS/Linux)
+	   - **imagemagick** (also used for the visual safety check)
      - **PyMuPDF** (prepared by the installer when available, or already present on the system)
 
 - **Does not** install DEVONthink scripts unless explicitly requested. (Obviously, this is a macOS-only feature.)
@@ -229,7 +234,7 @@ Key advanced options include:
 ### Preset strength ordering
 
 By design: `extreme ≤ standard ≤ light` in resulting size (within ~5%).
-`lossless` preserves quality/structure as much as possible with no image recompression.
+`lossless` never changes a pixel: structural optimization plus the lossless JPEG and JBIG2 passes.
 `standard` is intelligent and auto-detects whether PDFs are text-only or image-heavy.
 
 ---
@@ -312,8 +317,8 @@ PDFs with ICC color profiles (common in professional photography, design work, a
 1. Detects images with ICC profiles
 2. Tries the `pdf-deflyt-image-recompress` helper (ImageMagick recompression, ICC preserved)
 3. Also tries Ghostscript, which keeps the ICC colour space
-4. Uses the smallest result that keeps the page count and passes a low-resolution
-   visual comparison against the original
+4. Uses the smallest result that passes every safety check (see
+   [Safety rails](#high-level-flow)), including a visual comparison against the original
 
 ### Requirements
 
@@ -366,7 +371,7 @@ pdf-deflyt --debug icc-document.pdf
    - `light`: gentle downsampling; good for already decent PDFs
    - `standard`: intelligent auto-tuning based on content; safe for most PDFs
    - `extreme`: maximum shrinking while remaining legible
-   - `lossless`: structural optimizations only; no lossy image recompression
+   - `lossless`: structural optimizations plus lossless image passes; no pixel changes
 
 3. **Ghostscript synthesis**
    Ghostscript (`pdfwrite`) is used to:
@@ -411,7 +416,7 @@ pdf-deflyt --debug icc-document.pdf
 | light     | ~300            | ~78    | ~1200    | Higher quality; good for already-optimized PDFs |
 | standard  | ~200 (auto)     | ~72    | ~900     | Intelligent auto-tuning based on content |
 | extreme   | ~144            | ~68    | ~600     | Maximum compression while staying readable |
-| lossless  | keep            | n/a    | keep     | No lossy recompression; structural tweaks only |
+| lossless  | keep            | n/a    | keep     | No pixel changes; structural + lossless JPEG/JBIG2 passes |
 
 > `standard` preset automatically detects text-only PDFs and adjusts strategy. Use `--debug` to see the selected DPI/quality per run.
 
@@ -431,9 +436,9 @@ pdf-deflyt --debug icc-document.pdf
 
 ### Exit Status Codes
 
-- **0** → Success (including “skipped” files)
-- **1** → No PDFs after filtering
-- **2** → Usage error or unreadable input
+- **0** → Success (including files that were kept, skipped or left untouched because they are signed)
+- **1** → A file failed, a single `-o` output could not be written, or no PDFs were found / left after filtering
+- **2** → Usage error (bad option or value)
 - **127** → Missing dependency or environment misconfiguration
 
 ### Security
@@ -479,6 +484,9 @@ There are two AppleScripts provided:
 Both scripts use **pdf-deflyt** with the **standard** compression preset by default, but you can change that by editing the AppleScript source. The scripts perform the apply-or-fail logic directly in AppleScript and only replace the original file when the compressed PDF is smaller.
 
 Let DEVONthink complete OCR **before** compression (pdf-deflyt does **not** perform OCR).
+The OCR text layer is checked after compression, and a result that loses it is discarded.
+Digitally signed PDFs are left unchanged. JBIG2 output from the lossless scan pass was
+verified to render pixel-identically in PDFKit, which DEVONthink and Preview use.
 
 Both scripts append to the shared log file at `~/Library/Logs/pdf-deflyt.log`.
 
@@ -546,13 +554,23 @@ If the size does not change, check the log first. It should usually tell you whe
   Expected; there’s little to compress beyond structure.
 
 - **File looks slightly soft**  
-  Use `-p light`, or keep `standard` and raise quality (e.g., `-p light`).
+  Use `-p light`, or `-p lossless` to avoid any pixel changes.
+
+- **“NOTICE: … is digitally signed; keeping it unchanged”**  
+  Expected: any rewrite would invalidate the signature, so the file is passed through as is.
+
+- **Less savings than expected on forms or OCR'd scans**  
+  Run with `--verbose`: lines such as `candidate rejected: fields: … -> []` or
+  `text layer no longer matches the original` show that a smaller result was discarded
+  because it lost content. The smallest result that keeps everything is used instead.
 
 - **“Missing: ghostscript / pdfcpu / qpdf / mutool / poppler / exiftool”**  
   Run:  
   ```bash
   brew install ghostscript pdfcpu qpdf mupdf-tools poppler exiftool coreutils
   ```
+  Optional extras: `brew install imagemagick parallel python jpeg-turbo jbig2enc`
+  (`pdf-deflyt --check-deps` lists what is missing).
 
 - **In‑place timestamp drift**  
   APFS granularity can cause small drift; the tool keeps it within ~2 minutes.
@@ -646,7 +664,7 @@ Or manually move the compiled `.scpt` files into DEVONthink 3's scripts location
 - `pdf-deflyt` — the zsh CLI
 - `pdf-deflyt-image-recompress` — Python helper for ICC profile images
 - `tests/` — fixtures, helpers, and the full test suite
-- `scripts/` — `lint.sh`, `format.sh`
+- `scripts/` — `install-pdf-deflyt.sh`, `lint.sh`, `format.sh`
 - `devonthink-scripts/` — optional AppleScripts and compiled `.scpt`
 
 ## Running Tests
@@ -672,6 +690,10 @@ The suite verifies:
 - Default naming rule
 - Deterministic size ordering (`extreme ≤ standard ≤ light` within tolerance)
 - CSV logging (conditionally tested when supported)
+- Form fields, attachments, bookmarks, text layer and metadata survive compression
+- Signed PDFs are left byte-identical
+- `--timeout` stops a hung tool (a sleeping fake `gs`) and still produces output
+- Lossless JPEG optimization and JBIG2 re-encoding are smaller and pixel-identical
 
 **Useful environment flags:**
 
