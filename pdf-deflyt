@@ -1891,7 +1891,7 @@ _process_one_inner() {
   if [[ -n "$POST_HOOK" ]]; then
     local cmd=${POST_HOOK//\{\}/${(q)OUT}}
     if ! env IN="$orig" OUT="$OUT" ORIG_BYTES="$ORIG_BYTES" OUT_BYTES="$OUT_BYTES" \
-             PRESET="$PRESET" SAVEPCT="$SAVEPCT" /bin/zsh -lc -- "$cmd"; then
+             PRESET="$PRESET" SAVEPCT="$SAVEPCT" "${commands[zsh]:-zsh}" -lc -- "$cmd"; then
       log_warn "Post-hook command failed: $cmd"
     fi
   fi
