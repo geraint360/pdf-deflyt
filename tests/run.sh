@@ -940,6 +940,18 @@ pdfinfo "$d/meta-in.pdf" | grep "^Title: *Meta fixture" > /dev/null || fail "cou
 [ "$(pdfinfo -isodates "$d/meta-in.pdf" | grep -E '^(Title|CreationDate)')" = \
   "$(pdfinfo -isodates "$d/meta.pdf" | grep -E '^(Title|CreationDate)')" ] || fail "metadata not restored"
 
+# A title stored with a trailing NUL (ImageMagick 6 writes these) must not fail the
+# metadata check: qpdf may report the same bytes as text or as binary
+info=$(qpdf --show-object=trailer "$ASSETS_DIR/rgb.pdf" | sed -n 's|.*/Info \([0-9]*\) 0 R.*|\1|p')
+if [ -n "$info" ]; then
+  printf '{"qpdf":[{"jsonversion":2},{"obj:%s 0 R":{"value":{"/Title":"b:72676200"}}}]}' "$info" > "$d/nul.json"
+  qpdf "$ASSETS_DIR/rgb.pdf" --update-from-json="$d/nul.json" "$d/nul-in.pdf" > /dev/null 2>&1 || true
+  if [ -s "$d/nul-in.pdf" ]; then
+    out=$("$ROOT/pdf-deflyt" -p light --min-gain 0 "$d/nul-in.pdf" -o "$d/nul.pdf" 2>&1) || true
+    echo "$out" | grep -q "validation-failed" && fail "NUL-terminated title rejected: $out"
+  fi
+fi
+
 # Digitally signed PDFs are passed through byte-for-byte
 cat > "$d/sig-raw.pdf" << 'RAW'
 %PDF-1.7

@@ -115,7 +115,7 @@ EOF
 # ============================================================================
 # Configuration Constants (immutable)
 # ============================================================================
-readonly VERSION="2.5.1-zsh"
+readonly VERSION="2.5.2-zsh"
 readonly IMAGEMAGICK_TIMEOUT=30  # seconds for ImageMagick operations
 readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
 readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
@@ -1095,6 +1095,22 @@ def as_list(v):
     return v if isinstance(v, list) else [v]
 
 
+def pdf_text(v):
+    """Decode a qpdf JSON v2 string ("u:text" or "b:hex") to its value. qpdf may report
+    the same bytes either way (e.g. a title with a trailing NUL), so compare decoded."""
+    if isinstance(v, str) and v.startswith("u:"):
+        return v[2:]
+    if isinstance(v, str) and v.startswith("b:"):
+        try:
+            raw = bytes.fromhex(v[2:])
+        except ValueError:
+            return v
+        if raw[:2] == b"\xfe\xff":
+            return raw[2:].decode("utf-16-be", errors="replace")
+        return raw.decode("latin-1")
+    return v
+
+
 def fingerprint(path):
     """Features that must survive compression, plus the document metadata."""
     data = qpdf_json(path, ["pages", "acroform", "attachments", "outlines", "qpdf"])
@@ -1129,8 +1145,9 @@ def fingerprint(path):
     walk(data.get("outlines", []))
 
     info = deref(objs.get("trailer", {}).get("value", {}).get("/Info")) or {}
-    meta = {k: info.get(k) for k in ("/Title", "/Author", "/Subject", "/Keywords",
-                                     "/Creator", "/CreationDate", "/ModDate") if info.get(k) is not None}
+    meta = {k: pdf_text(info.get(k)) for k in ("/Title", "/Author", "/Subject", "/Keywords",
+                                               "/Creator", "/CreationDate", "/ModDate")
+            if info.get(k) is not None}
     return {
         "features": {
             "pages": len(data.get("pages", [])),
@@ -1465,34 +1482,33 @@ finalize_candidate() {
 }
 
 # Sanity-check a candidate against the (decrypted) input it was derived from.
+# Record why a candidate was rejected; the last reason is reported if nothing is valid
+reject() { REJECT_WHY="$*"; log_verbose "candidate rejected: $*"; return 1; }
+
 validate_candidate() {
   local ref="$1" cand="$2" ref_pages="$3" lossy="$4" scratch="$5" pages
   [[ -s "$cand" ]] || return 1
   pages=$(page_count "$cand")
   if [[ "$pages" != "$ref_pages" ]]; then
-    log_debug "candidate rejected: page count $pages != $ref_pages"
-    return 1
+    reject "page count $pages != $ref_pages"; return 1
   fi
   if $VALIDATE; then
     # qpdf exits 3 for warnings-only; treat that as acceptable
     local qrc=0
     qpdf --check "$cand" >/dev/null 2>&1 || qrc=$?
-    (( qrc == 0 || qrc == 3 )) || { log_debug "candidate rejected: qpdf --check failed"; return 1; }
+    (( qrc == 0 || qrc == 3 )) || { reject "qpdf --check failed"; return 1; }
   fi
   if [[ -n "${REF_FP:-}" ]]; then
     local why
     if ! why="$(pdftool check "$REF_FP" "$cand" 2>&1)"; then
-      log_verbose "candidate rejected: ${why:-feature check failed}"
-      return 1
+      reject "${why:-feature check failed}"; return 1
     fi
   fi
   if [[ -n "${REF_TXT:-}" ]] && ! text_check "$REF_TXT" "$cand" "$scratch.txt"; then
-    log_verbose "candidate rejected: text layer no longer matches the original"
-    return 1
+    reject "text layer no longer matches the original"; return 1
   fi
   if [[ "$lossy" == true ]] && ! visual_check "$ref" "$cand" "$ref_pages" "$scratch"; then
-    log_verbose "candidate rejected: rendered pages differ too much from the original"
-    return 1
+    reject "rendered pages differ too much from the original"; return 1
   fi
   return 0
 }
@@ -1694,7 +1710,7 @@ _process_one_inner() {
   local W="$_po_work"
 
   # 0) Reference: features/metadata fingerprint, text layer, and signature check
-  local REF_FP="" REF_TXT="" SIGNED=false NO_LOSSY=false HAS_FIELDS=false
+  local REF_FP="" REF_TXT="" SIGNED=false NO_LOSSY=false HAS_FIELDS=false REJECT_WHY=""
   if [[ -n "$PYTHON" ]]; then
     if pdftool fingerprint "$IN" > "$W/ref.json" 2>/dev/null && [[ -s "$W/ref.json" ]]; then
       REF_FP="$W/ref.json"
@@ -1830,7 +1846,7 @@ _process_one_inner() {
   if $SIGNED; then
     OUT_BYTES=$ORIG_BYTES
   elif [[ -z "$best" ]]; then
-    log_error "No valid compressed result for ${orig##*/}; keeping original"
+    log_error "No valid compressed result for ${orig##*/}; keeping original${REJECT_WHY:+ (last rejection: $REJECT_WHY)}"
     note="validation-failed"
     OUT_BYTES=$ORIG_BYTES
   else

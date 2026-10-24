@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-10-24
+
+### Fixed
+- Metadata check rejected every result on Linux (qpdf 11) for PDFs whose title ends in a
+  NUL byte, as ImageMagick 6 writes them: qpdf reported the same bytes as text before
+  and as binary after the restore. Metadata is now compared by decoded value
+
+### Changed
+- "No valid compressed result" errors now include the reason the last candidate was
+  rejected (previously only shown with `--verbose`), so DEVONthink logs say why
+
 ## [2.5.1] - 2026-10-24
 
 ### Fixed
