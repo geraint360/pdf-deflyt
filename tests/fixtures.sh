@@ -165,6 +165,11 @@ RAW
       --add-attachment "$BUILD_DIR/notes.txt" -- "$ASSETS_DIR/form_mixed.pdf" > /dev/null 2>&1 || true
     rm -f "$BUILD_DIR/form_raw.pdf" "$BUILD_DIR/notes.txt"
   fi
+
+  # Photo cap: a web clip (decorative photo + an image with printed text) and an OCR'd scan
+  if _have magick && _have python3; then
+    python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/make_photo_fixtures.py" "$ASSETS_DIR" "$BUILD_DIR" || true
+  fi
 }
 
 create_fixtures

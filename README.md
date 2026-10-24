@@ -42,6 +42,10 @@ See [Examples](#examples) for more usage patterns.
 - Simple CLI: `pdf-deflyt input.pdf -o output.pdf` (or compress in place with `--inplace`)
 - Multiple presets tuned for different trade‑offs: **light**, **standard**, **extreme**, **lossless**
 - **ICC profile support**: Automatically detects and handles complex color profiles using ImageMagick
+- **Photo cap for web clips and articles** (macOS): oversized decorative photos are brought
+  down to a sensible reference resolution, while anything carrying text (screenshots,
+  charts, maps, signs, scanned pages) keeps every pixel. macOS Vision checks each image
+  before and after, so legibility and OCR are never traded for size
 - **Lossless gains on every preset**: Huffman-optimized JPEGs (`jpegtran`) and pixel-exact
   JBIG2 for black-and-white scans (`jbig2enc`) — typically 30–50% off scanner G4 output
 - **Nothing important is lost**: form fields, annotations, links, bookmarks, attachments, the
@@ -173,6 +177,15 @@ pdf-deflyt [options] <file-or-dir>...
 - `--min-gain <pct>`  
   Only replace a file if the compressed result is at least this much smaller.  
   If smaller savings, the original is kept.
+
+- `--no-photo-cap`
+  Keep decorative photos at their original resolution (see [Photo cap](#photo-cap)).
+
+- `--dpi <N>`
+  Downsample **every** colour/grey image above N ppi to N (36–600), and use N as the photo
+  cap too. Unlike the photo cap this also applies to scanned pages and screenshots, so
+  pick a value that keeps scanned text legible (150+); the automatic photo cap is usually
+  the better choice.
 
 - `--password <pw>`  
   Password for encrypted PDFs. Without this, encrypted files are **skipped** safely.
@@ -307,6 +320,44 @@ pdf-deflyt --inplace --post-hook 'echo Processed: {} >> ~/processed.log' ~/Scans
 
 ---
 
+## Photo cap
+
+Web clips and online articles often embed photos at two or three times the resolution they
+are drawn at: a 2000-pixel hero image shown 300 points wide is about 480 ppi. Ghostscript's
+downsampling applies one rule to every image, and a target low enough for these photos would
+also soften scanned pages and screenshots. So on macOS a separate pass looks at each image on
+its own and caps only **decorative photos** at a reference resolution:
+
+| Preset | Photo cap |
+|--------|-----------|
+| light | 144 ppi |
+| standard | 96 ppi |
+| extreme | 72 ppi |
+| lossless | off |
+
+An image is capped only when **all** of these hold:
+
+- it is drawn on less than half of its page, on a page with real (visible) text, so it is
+  an inset in an article, not a scanned page or a slide
+- no text, visible or invisible (OCR layers), is laid over it
+- it has no transparency mask and is not 1-bit
+- macOS Vision finds no more than a few words in it (screenshots, charts, maps, tables and
+  text panels keep their resolution)
+- after downsampling, Vision still reads **every** word it read in the original (a sign or
+  a caption on a photo stays legible, otherwise the image is left alone)
+- it shrinks by at least 10%
+
+The capped document then goes through the same checks as every other candidate (text layer,
+features, visual comparison). Use `--verbose` to see what was capped or skipped and why,
+and `--no-photo-cap` to turn it off.
+
+The photo cap needs `pdf-deflyt-ocr`, a small Swift program built by `make install-bin` or
+the installer (Xcode command line tools: `xcode-select --install`), and PyMuPDF for the
+helper. Vision is not available on Linux, so there the photo cap is off. The first run on a
+Mac takes up to a minute while macOS loads its text-recognition model.
+
+---
+
 ## ICC Profile Images
 
 PDFs with ICC color profiles (common in professional photography, design work, and some scanned documents) require special handling to preserve color accuracy.
@@ -399,8 +450,8 @@ pdf-deflyt --debug icc-document.pdf
 7. **Safety rails**
    - Digitally signed PDFs are left byte-for-byte untouched (any rewrite invalidates the
      signature), with a notice.
-   - Several candidates are produced (structural only, Ghostscript, and the ImageMagick
-     helper for ICC images or documents with form fields). Every candidate must keep the
+   - Several candidates are produced (structural only, Ghostscript, the ImageMagick
+     helper for ICC images or documents with form fields, and the photo cap). Every candidate must keep the
      page count, form fields and values, annotations and links, bookmarks, attachments,
      the document metadata and the text layer (≥97% of words). Lossy candidates must also
      pass a visual comparison of up to 5 pages sampled across the whole document (first,
@@ -456,21 +507,25 @@ pdf-deflyt --debug icc-document.pdf
 
 #### Typical Performance
 
-Measured with 2.5.1 on an Apple M2 Pro, on real documents from a DEVONthink database
+Measured with 2.6.0 on an Apple M2 Pro, on real documents from a DEVONthink database
 (savings per preset; time is wall-clock for `standard`):
 
 | Document | Pages | Size | light | standard | extreme | lossless | Time |
 |----------|-------|------|-------|----------|---------|----------|------|
-| Magazine article (iOS export, full-page photos) | 7 | 8.3 MB | 8% | 46% | 69% | 1% | 12 s |
-| Travel article, web clip | 1 (long) | 4.7 MB | 64% | 81% | 88% | 0% | 9 s |
-| Web clip, already compressed by PDF Squeezer | 1 (long) | 3.5 MB | 0% | 3% | 6% | 0% | 9 s |
-| Web clip, already compressed by PDF Squeezer | 1 (long) | 7.2 MB | 0% | 3% | 6% | 0% | 20 s |
+| Magazine article (iOS export, full-page photos) | 7 | 8.3 MB | 8% | 46% | 69% | 1% | 14 s |
+| Travel article, web clip | 1 (long) | 4.7 MB | 63% | 81% | 87% | 0% | 14 s |
+| Web clip, already compressed by PDF Squeezer | 1 (long) | 3.5 MB | 0% | 2% | 37% | 0% | 12 s |
+| Web clip, already compressed by PDF Squeezer | 1 (long) | 7.2 MB | 0% | 36% | 62% | 0% | 35 s |
 
-Already-optimized files barely shrink: their images are at 120 ppi, below every preset's
-target, so nothing is downsampled, and the small gain comes only from re-encoding the
-JPEGs at the preset's quality. `0%` means the original was kept unchanged.
+The PDF Squeezer clips have their photos at about 120 ppi: above the photo cap for
+`standard` (96 ppi) and `extreme` (72 ppi), below it for `light` (144 ppi), which then
+keeps the original. How much the cap saves depends on how many of the images it may touch:
+photos with legible text in them, and images under text, keep their resolution.
+The magazine article's full-page photos are not insets, so the photo cap leaves them to
+the regular preset downsampling. `0%` means the original was kept unchanged.
 `lossless` gains come from Huffman-optimizing unoptimized JPEGs and from JBIG2 on
 black-and-white scans, so they show up on scanner output rather than on web clips.
+The photo cap's OCR checks add a few seconds per image-heavy page.
 
 There is also a fixed per-file overhead from tool start-up and the safety checks: about
 1.5 s with the lossy presets and 0.9 s with `lossless`, even for a one-page file.

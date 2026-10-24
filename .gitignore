@@ -1,4 +1,5 @@
 devonthink-scripts/compiled/
+/pdf-deflyt-ocr
 .DS_Store
 
 # Test artifacts

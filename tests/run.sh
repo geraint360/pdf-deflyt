@@ -1002,6 +1002,56 @@ PRS
 chmod +x "$BUILD_DIR/preserve_body.sh"
 cases+=("preserve_features::bash \"$BUILD_DIR/preserve_body.sh\"")
 
+# 15) Photo cap (macOS only: needs the Vision OCR tool and a helper that can import PyMuPDF)
+cat > "$BUILD_DIR/photo_cap_body.sh" << 'PCB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${PDF_DEFLYT_TEST_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+BUILD_DIR="${PDF_DEFLYT_BUILD_DIR:-$ROOT/tests/build}"
+ASSETS_DIR="${PDF_DEFLYT_ASSETS_DIR:-$ROOT/tests/assets}"
+WORK_DIR="${PDF_DEFLYT_WORK_DIR:-$BUILD_DIR/work}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*"; exit 0; }
+# Column of `pdfimages -list` for image N (0-based): 4 = width, 13 = x-ppi
+col() { pdfimages -list "$1" 2>/dev/null | awk -v n="$2" -v c="$3" 'NR>2 && $2==n {print $c}'; }
+
+export PDF_DEFLYT_HELPER="$ROOT/pdf-deflyt-image-recompress"
+export PDF_DEFLYT_OCR="$ROOT/pdf-deflyt-ocr"
+[[ "$OSTYPE" == darwin* ]] || skip "photo cap is macOS only"
+[ -x "$PDF_DEFLYT_OCR" ] || skip "pdf-deflyt-ocr not built"
+[ -f "$ASSETS_DIR/webclip.pdf" ] && [ -f "$ASSETS_DIR/ocrscan.pdf" ] || skip "photo fixtures missing"
+
+d="$WORK_DIR/photo_cap"
+rm -rf "$d"; mkdir -p "$d"
+
+# Before/after legibility: at 36 ppi the sign's words are no longer readable, so it is kept
+report=$("$PDF_DEFLYT_HELPER" --photo-cap 36 -q 72 --ocr "$PDF_DEFLYT_OCR" "$ASSETS_DIR/webclip.pdf" "$d/c36.pdf" 2>&1) || true
+echo "$report" | grep -q '"capped"' || skip "helper cannot run the photo cap: $report"
+echo "$report" | grep -q '"less legible after downsampling": 1' || fail "sign not protected at 36 ppi: $report"
+echo "$report" | grep -q '"contains text": 1' || fail "label not detected as text: $report"
+[ "$(col "$d/c36.pdf" 2 4)" = 1200 ] || fail "illegible sign was downsampled"
+
+# Web clip: the decorative photo is capped, the text-bearing label keeps its pixels
+log=$("$ROOT/pdf-deflyt" --verbose -p standard "$ASSETS_DIR/webclip.pdf" -o "$d/clip.pdf" 2>&1) || fail "webclip run failed: $log"
+echo "$log" | grep -q '"capped"' || fail "photo cap did not run: $log"
+[ "$(col "$d/clip.pdf" 0 13)" -le 100 ] || fail "photo not capped: $(col "$d/clip.pdf" 0 13) ppi"
+[ "$(col "$d/clip.pdf" 1 4)" = 1200 ] || fail "label was downsampled"
+pdftotext "$d/clip.pdf" - | grep "Travel notes paragraph 40" > /dev/null || fail "article text lost"
+
+# --no-photo-cap leaves the photo alone
+"$ROOT/pdf-deflyt" -p standard --no-photo-cap "$ASSETS_DIR/webclip.pdf" -o "$d/nocap.pdf" > /dev/null 2>&1 || fail "--no-photo-cap run failed"
+[ "$(col "$d/nocap.pdf" 0 13)" -ge 190 ] || fail "--no-photo-cap still capped: $(col "$d/nocap.pdf" 0 13) ppi"
+
+# OCR'd scans are never capped (the image covers the page and has text over it)
+report=$("$PDF_DEFLYT_HELPER" --photo-cap 96 -q 72 --ocr "$PDF_DEFLYT_OCR" "$ASSETS_DIR/ocrscan.pdf" "$d/scan.pdf" 2>&1) || true
+echo "$report" | grep -q '"capped": 0' || fail "scan was capped: $report"
+echo "$report" | grep -q 'covers most of the page' || fail "scan not recognised: $report"
+PCB
+chmod +x "$BUILD_DIR/photo_cap_body.sh"
+cases+=("photo_cap::bash \"$BUILD_DIR/photo_cap_body.sh\"")
+
 # ---------- RUN PARALLEL ----------
 run_one() {
   # Keep each case as a single opaque string; write to a temp script and run it.

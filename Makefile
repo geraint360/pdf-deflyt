@@ -35,7 +35,7 @@ DT_RULES   := $(DT_SCRIPTS_DIR)/Smart Rules
 DT_MENU_SCRIPT := Compress PDF Now.scpt
 DT_RULE_SCRIPT := Compress PDF (Smart Rule).scpt
 
-.PHONY: compile clean show-paths test test-clean install-bin install-dt uninstall-dt install lint smoke smoke-clean fmt benchmark
+.PHONY: ocr compile clean show-paths test test-clean install-bin install-dt uninstall-dt install lint smoke smoke-clean fmt benchmark
 
 .DEFAULT_GOAL := help
 
@@ -115,10 +115,19 @@ uninstall-dt:
 	@echo "  • $(DT_RULES)"
 
 # Install pdf-deflyt into ~/bin (create if missing)
-install-bin:
+# Vision text recognizer used by the photo cap (macOS only; skipped without swiftc)
+ocr: pdf-deflyt-ocr.swift
+	@if [ "$$(uname)" = Darwin ] && command -v swiftc > /dev/null 2>&1; then \
+	  if [ ! -x pdf-deflyt-ocr ] || [ pdf-deflyt-ocr.swift -nt pdf-deflyt-ocr ]; then \
+	    echo "Building pdf-deflyt-ocr..."; swiftc -O -o pdf-deflyt-ocr pdf-deflyt-ocr.swift; \
+	  fi; \
+	else echo "Skipping pdf-deflyt-ocr (needs macOS and swiftc); the photo cap will be off"; fi
+
+install-bin: ocr
 	@mkdir -p "$(BIN_DIR)"
 	@install -m 0755 pdf-deflyt "$(BIN_DIR)/pdf-deflyt"
 	@install -m 0755 pdf-deflyt-image-recompress "$(BIN_DIR)/pdf-deflyt-image-recompress"
+	@if [ -x pdf-deflyt-ocr ]; then install -m 0755 pdf-deflyt-ocr "$(BIN_DIR)/pdf-deflyt-ocr"; echo "Installed to $(BIN_DIR)/pdf-deflyt-ocr"; fi
 	@echo "Installed to $(BIN_DIR)/pdf-deflyt"
 	@echo "Installed to $(BIN_DIR)/pdf-deflyt-image-recompress"
 	@case ":$(PATH):" in *:"$(BIN_DIR)":*) ;; *) echo 'NOTE: add $(BIN_DIR) to your PATH';; esac
@@ -132,7 +141,7 @@ test-clean: clean
 	@echo "Test environment reset: rebuilt $(BUILD_DIR) and $(ASSETS_DIR)."
 		
 # Run the full test suite from a clean slate
-test: test-clean
+test: test-clean ocr
 	@echo "🔄 Rebuilding fixtures..."
 	@PDF_DEFLYT_TEST_ROOT="$(CURDIR)" \
 	  PDF_DEFLYT_BUILD_DIR="$(CURDIR)/tests/build" \

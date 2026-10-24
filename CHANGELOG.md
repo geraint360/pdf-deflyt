@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-24
+
+### Added
+- Photo cap (macOS): decorative photos in web clips and articles are downsampled to
+  144/96/72 ppi (light/standard/extreme). Only images that are page insets, carry no
+  text (macOS Vision, plus no text drawn over them) and stay as legible after
+  downsampling are touched; scanned pages, screenshots, charts and maps keep their
+  resolution. `--no-photo-cap` turns it off
+- `pdf-deflyt-ocr`, a small Vision text reader built by `make install-bin` and the
+  installer when `swiftc` is available
+- `--dpi N`: downsample every colour/grey image above N ppi to N, including scans
+
+### Fixed
+- The image helper, run from a checkout, now falls back to the installer's
+  `~/bin/.pdf-deflyt-venv` when the checkout's own venv has no PyMuPDF
+
 ## [2.5.2] - 2026-10-24
 
 ### Fixed

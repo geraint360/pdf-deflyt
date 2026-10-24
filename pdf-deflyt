@@ -73,6 +73,12 @@ Advanced Options for pdf-deflyt
 
 Quality:
   -q, --quality N          Override the preset's JPEG quality (1-100)
+  --dpi N                  Downsample every colour/gray image above N ppi to N (36-600),
+                           including scanned pages; prefer the automatic photo cap
+  --no-photo-cap           Keep decorative photos at their original resolution. By
+                           default (macOS) photos in web clips and articles are capped
+                           at 144/96/72 ppi (light/standard/extreme) when nothing about
+                           them carries text; see README "Photo cap"
 
 Security:
   --password TEXT          Decrypt password
@@ -115,7 +121,7 @@ EOF
 # ============================================================================
 # Configuration Constants (immutable)
 # ============================================================================
-readonly VERSION="2.5.2-zsh"
+readonly VERSION="2.6.0-zsh"
 readonly IMAGEMAGICK_TIMEOUT=30  # seconds for ImageMagick operations
 readonly PYMUPDF_GARBAGE_LEVEL=4  # PyMuPDF garbage collection level
 readonly APFS_TIME_TOLERANCE=120   # seconds tolerance for timestamp preservation
@@ -181,6 +187,8 @@ MIN_GAIN=1
 
 # JPEG quality override (-q); empty means use the preset's value
 JPEGQ_OVERRIDE=""
+DPI_OVERRIDE=""
+PHOTO_CAP=true
 
 # Resource management
 MEMORY_LIMIT=""
@@ -214,6 +222,8 @@ while [[ $# -gt 0 ]]; do
     -p|--preset) PRESET="${2:-}"; shift 2 ;;
     -o|--output) OUT_SINGLE="${2:-}"; shift 2 ;;
     -q|--quality) JPEGQ_OVERRIDE="${2:-}"; shift 2 ;;
+    --dpi) DPI_OVERRIDE="${2:-}"; shift 2 ;;
+    --no-photo-cap) PHOTO_CAP=false; shift ;;
     --recurse) RECURSE=true; shift ;;
     --jobs) JOBS="${2:-auto}"; shift 2 ;;
     --inplace) INPLACE=true; shift ;;
@@ -459,6 +469,13 @@ if [[ -n "$PASSWORD_FILE" ]]; then
   fi
 fi
 
+if [[ -n "$DPI_OVERRIDE" ]]; then
+  if ! [[ "$DPI_OVERRIDE" =~ ^[0-9]+$ ]] || (( DPI_OVERRIDE < 36 || DPI_OVERRIDE > 600 )); then
+    log_error "--dpi must be between 36 and 600 (got: $DPI_OVERRIDE)"
+    exit 2
+  fi
+fi
+
 # Validate JPEG quality
 if [[ -n "$JPEGQ_OVERRIDE" ]]; then
   if ! [[ "$JPEGQ_OVERRIDE" =~ ^[0-9]+$ ]] || (( JPEGQ_OVERRIDE < 1 || JPEGQ_OVERRIDE > 100 )); then
@@ -520,6 +537,18 @@ if $BACKUP && ! $INPLACE; then
   log_info "Suggestion: Use --inplace --backup to create .bak files before replacing originals"
 fi
 
+# pdf-deflyt-ocr (macOS Vision) decides whether an image carries text. Without it the
+# photo cap is off: nothing is downsampled on a guess.
+resolve_ocr_tool() {
+  [[ "$OSTYPE" == darwin* ]] || return 1
+  local this="${0:A}" cand
+  for cand in "${PDF_DEFLYT_OCR:-}" "$HOME/bin/pdf-deflyt-ocr" "${this:h}/pdf-deflyt-ocr" \
+      "$(command -v pdf-deflyt-ocr 2>/dev/null)"; do
+    [[ -n "$cand" && -x "$cand" ]] && { print -r -- "$cand"; return 0; }
+  done
+  return 1
+}
+
 check_deps() {
   local -a REQ_CMDS REQ_DESC OPT_CMDS OPT_DESC
   REQ_CMDS=("${REQUIRED_DEPS[@]}")
@@ -554,6 +583,14 @@ check_deps() {
     fi
     ((j++))
   done
+
+  if [[ "$OSTYPE" == darwin* ]]; then
+    if resolve_ocr_tool >/dev/null 2>&1; then
+      printf "%-12s  %-10s  %s\n" "pdf-deflyt-ocr" "OK" "built by make install-bin (optional, photo cap)"
+    else
+      printf "%-12s  %-10s  %s\n" "pdf-deflyt-ocr" "MISSING" "built by make install-bin (optional, photo cap)"
+    fi
+  fi
 
   echo
   echo "Install with:"
@@ -908,12 +945,15 @@ gs_pass() {
 
   if (( C_RES > 0 )); then
     GS_COMMON+=(-dDownsampleColorImages=true -dColorImageDownsampleType=/Bicubic -dColorImageResolution="$C_RES")
+    # Ghostscript only downsamples above 1.5x the target by default; --dpi means "at most N"
+    [[ -n "$DPI_OVERRIDE" ]] && GS_COMMON+=(-dColorImageDownsampleThreshold=1.0)
   else
     GS_COMMON+=(-dDownsampleColorImages=false)
   fi
 
   if (( G_RES > 0 )); then
     GS_COMMON+=(-dDownsampleGrayImages=true -dGrayImageDownsampleType=/Bicubic -dGrayImageResolution="$G_RES")
+    [[ -n "$DPI_OVERRIDE" ]] && GS_COMMON+=(-dGrayImageDownsampleThreshold=1.0)
   else
     GS_COMMON+=(-dDownsampleGrayImages=false)
   fi
@@ -961,6 +1001,16 @@ gs_text_only_pass() {
   local rc=0
   limit gs "${GS_TEXT_OPTS[@]}" -sOutputFile="$out" -f "$in" >/dev/null 2>&1 || rc=$?
   (( rc == 124 )) && log_warn "Ghostscript timed out after ${STEP_TIMEOUT}s on ${in:t} (see --timeout)"
+  return $rc
+}
+
+# Downsample decorative photos only (see photo_cap in the helper).
+# Returns 0 if images were capped, 2 if there was nothing to cap, 1 on failure.
+photo_cap_pass() {
+  local in="$1" out="$2" helper report rc=0
+  helper="$(resolve_icc_helper)" || return 1
+  report="$(limit "$helper" -q "${JPEGQ:-72}" --photo-cap "$PHOTO_PPI" --ocr "$OCR_TOOL" "$in" "$out" 2>/dev/null)" || rc=$?
+  log_verbose "photo cap (${PHOTO_PPI} ppi) on ${in:t}: ${report:-no report}"
   return $rc
 }
 
@@ -1598,6 +1648,19 @@ compute_targets() {
   if [[ -n "$JPEGQ_OVERRIDE" && "$pre" != lossless ]]; then
     JPEGQ="$JPEGQ_OVERRIDE"
   fi
+  if [[ -n "$DPI_OVERRIDE" && "$pre" != lossless ]]; then
+    C_RES="$DPI_OVERRIDE"; G_RES="$DPI_OVERRIDE"
+    (( JPEGQ > 0 )) || JPEGQ=74
+  fi
+  # Resolution for decorative photos (images that carry no text), in ppi at drawn size
+  case "$pre" in
+    light) PHOTO_PPI=144 ;;
+    standard) PHOTO_PPI=96 ;;
+    extreme) PHOTO_PPI=72 ;;
+    *) PHOTO_PPI=0 ;;
+  esac
+  [[ -n "$DPI_OVERRIDE" && "$pre" != lossless ]] && PHOTO_PPI="$DPI_OVERRIDE"
+  return 0
 }
 
 has_icc_images() {
@@ -1752,7 +1815,7 @@ _process_one_inner() {
   local C_CNT G_CNT M_CNT C_MED G_MED M_MED C_MIN G_MIN M_MIN C_MAX G_MAX M_MAX
   read -r C_CNT G_CNT M_CNT C_MED G_MED M_MED C_MIN G_MIN M_MIN C_MAX G_MAX M_MAX <<<"$(analyse_pdf "$base")"
   local NO_IMAGES=false; (( C_CNT + G_CNT + M_CNT == 0 )) && NO_IMAGES=true
-  local C_RES G_RES M_RES JPEGQ
+  local C_RES G_RES M_RES JPEGQ PHOTO_PPI
   compute_targets "$PRESET" "$NO_IMAGES"
 
   local HAS_ICC=false
@@ -1802,6 +1865,19 @@ _process_one_inner() {
       cands+=("$W/gs.pdf"); cand_lossy[$W/gs.pdf]=true
     else
       log_warn "Ghostscript recompression failed for ${orig##*/}; using structural optimization only"
+    fi
+    # Decorative photos (web clips, articles): Ghostscript applies one rule to every
+    # image, so photos that carry no text are capped separately. One pass (Vision OCR is
+    # the slow part), on the smaller of the structural and Ghostscript results; documents
+    # with form fields use the structural one, since Ghostscript drops their fields
+    if [[ -n "$OCR_TOOL" ]] && (( PHOTO_PPI > 0 )); then
+      local cap_src="$base"
+      if [[ -s "$W/gs.pdf" ]] && ! $HAS_FIELDS && (( $(size_of "$W/gs.pdf") < $(size_of "$base") )); then
+        cap_src="$W/gs.pdf"
+      fi
+      if photo_cap_pass "$cap_src" "$W/cap.pdf"; then
+        cands+=("$W/cap.pdf"); cand_lossy[$W/cap.pdf]=true
+      fi
     fi
   fi
 
@@ -1938,7 +2014,7 @@ run_wrapper() {
     local C_CNT G_CNT M_CNT C_MED G_MED M_MED C_MIN G_MIN M_MIN C_MAX G_MAX M_MAX
     read -r C_CNT G_CNT M_CNT C_MED G_MED M_MED C_MIN G_MIN M_MIN C_MAX G_MAX M_MAX <<<"$(analyse_pdf "$tmp1")"
     local NO_IMAGES=false; (( C_CNT + G_CNT + M_CNT == 0 )) && NO_IMAGES=true
-    local C_RES G_RES M_RES JPEGQ
+    local C_RES G_RES M_RES JPEGQ PHOTO_PPI
     compute_targets "$PRESET" "$NO_IMAGES"
 
     local EST_LOW EST_HIGH
@@ -1972,6 +2048,7 @@ fi
 PYTHON="$(find_python 2>/dev/null)" || PYTHON=""
 HAVE_JPEGTRAN=false; command -v jpegtran >/dev/null 2>&1 && HAVE_JPEGTRAN=true
 HAVE_JBIG2=false; command -v jbig2 >/dev/null 2>&1 && HAVE_JBIG2=true
+OCR_TOOL=""; $PHOTO_CAP && OCR_TOOL="$(resolve_ocr_tool 2>/dev/null)" || OCR_TOOL=""
 
 if $INTERNAL_ONE; then
   rc=0
@@ -1998,6 +2075,8 @@ if (( JOBS > 1 )); then
   typeset -a WORKER_OPTS
   WORKER_OPTS=(-p "$PRESET" --min-gain "$MIN_GAIN" --color "$($ENABLE_COLOR && echo always || echo never)")
   [[ -n "$JPEGQ_OVERRIDE" ]] && WORKER_OPTS+=(-q "$JPEGQ_OVERRIDE")
+  [[ -n "$DPI_OVERRIDE" ]] && WORKER_OPTS+=(--dpi "$DPI_OVERRIDE")
+  $PHOTO_CAP || WORKER_OPTS+=(--no-photo-cap)
   $INPLACE && WORKER_OPTS+=(--inplace)
   $BACKUP && WORKER_OPTS+=(--backup)
   $VALIDATE && WORKER_OPTS+=(--validate)

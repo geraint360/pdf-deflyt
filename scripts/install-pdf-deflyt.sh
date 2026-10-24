@@ -538,6 +538,24 @@ install_files() {
     prepare_pymupdf_support || true
   fi
 
+  # macOS: build the Vision text reader used by the photo cap (needs the Xcode command line tools)
+  if on_macos; then
+    local ocr_dst="$INSTALL_PREFIX/pdf-deflyt-ocr"
+    if command -v swiftc > /dev/null 2>&1; then
+      local ocr_src
+      ocr_src="$(mktemp -d)/pdf-deflyt-ocr.swift"
+      log "[build] Building pdf-deflyt-ocr -> $ocr_dst"
+      if download_to "$REPO_RAW/pdf-deflyt-ocr.swift" "$ocr_src" && swiftc -O -o "$ocr_dst" "$ocr_src"; then
+        log "[verify] pdf-deflyt-ocr built"
+      else
+        log "[build] Could not build pdf-deflyt-ocr; the photo cap will be off"
+      fi
+      rm -rf "$(dirname "$ocr_src")"
+    else
+      log "[build] swiftc not found (xcode-select --install); the photo cap will be off"
+    fi
+  fi
+
   if on_macos && [[ $INSTALL_DT -eq 1 ]]; then
     cleanup_other_dt_version_if_explicit
     install_dt_scripts_macos
@@ -558,6 +576,11 @@ uninstall_everything() {
   if [[ -f "$helper_dst" ]]; then
     rm -f "$helper_dst"
     log "[rm] $helper_dst"
+    removed=1
+  fi
+  if [[ -f "$INSTALL_PREFIX/pdf-deflyt-ocr" ]]; then
+    rm -f "$INSTALL_PREFIX/pdf-deflyt-ocr"
+    log "[rm] $INSTALL_PREFIX/pdf-deflyt-ocr"
     removed=1
   fi
   if [[ -d "$venv_dir" ]]; then
@@ -630,6 +653,7 @@ verify_report() {
   echo "Core scripts:"
   echo "  pdf-deflyt: $(command -v pdf-deflyt || echo 'not on PATH')"
   echo "  helper: $(command -v pdf-deflyt-image-recompress || echo 'not on PATH')"
+  on_macos && echo "  ocr: $([[ -x "$INSTALL_PREFIX/pdf-deflyt-ocr" ]] && echo "$INSTALL_PREFIX/pdf-deflyt-ocr" || echo 'not built (photo cap off)')"
   echo
   echo "Required dependencies:"
   echo "  ghostscript: $(command -v gs || echo 'MISSING')"

@@ -20,6 +20,14 @@ jobs:
           brew install ghostscript pdfcpu qpdf mupdf-tools exiftool poppler coreutils parallel imagemagick zsh jpeg-turbo jbig2enc
           pdfcpu version
 
+      # PyMuPDF for the image helper (ICC images and the photo cap), where the installer puts it
+      - name: Install PyMuPDF (macOS)
+        run: |
+          set -euxo pipefail
+          python3 -m venv "$HOME/bin/.pdf-deflyt-venv"
+          "$HOME/bin/.pdf-deflyt-venv/bin/python3" -m pip install --quiet PyMuPDF
+          "$HOME/bin/.pdf-deflyt-venv/bin/python3" -c 'import fitz; print(fitz.VersionBind)'
+
       - name: Install linters (macOS)
         run: |
           set -euxo pipefail
